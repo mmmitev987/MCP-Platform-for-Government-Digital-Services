@@ -1,0 +1,44 @@
+# gateway/config.yaml
+# ────────────────────────────────────────────────────────────────────────────────
+# Registry of all institution MCP servers managed by the gateway.
+#
+# How the gateway uses this file:
+#   1. On startup it reads this list.
+#   2. For each entry it spawns the institution server as a subprocess using
+#      the given command + args.
+#   3. It connects to each subprocess over stdin/stdout (MCP stdio transport).
+#   4. It fetches the tool list from each and registers them under the
+#      namespace  "<slug>__<original_tool_name>"  (e.g. uslugi__login).
+#   5. Tool descriptions are prefixed with "[<name>]" so the LLM can see
+#      which institution each tool belongs to.
+#
+# Adding a new institution:
+#   1. Create its directory under institutions/<new_slug>/
+#   2. Add an entry here — that is ALL that needs to change in this file.
+#      No changes to the gateway code or the agent are required.
+#
+# Fields:
+#   slug    — Short identifier used as the tool namespace prefix.
+#             Must contain only alphanumerics and underscores.
+#             E.g.  uslugi  →  tools are named  uslugi__login, uslugi__logout …
+#   name    — Human-readable portal name shown in LLM tool descriptions.
+#   command — Executable to use (use the Python interpreter).
+#             "python" is resolved at runtime to sys.executable so the venv
+#             Python is always used — never a system Python.
+#   args    — Command-line arguments; "-m <module>" runs as a module (preferred
+#             over a file path so Python resolves imports from the project root).
+
+institutions:
+  - slug: uslugi
+    name: "uslugi.gov.mk"
+    command: python
+    args:
+      - "-m"
+      - "institutions.uslugi.main"
+
+  - slug: mojtermin
+    name: "mojtermin.mk"
+    command: python
+    args:
+      - "-m"
+      - "institutions.mojtermin.main"

@@ -1,52 +1,58 @@
 """
 agent/gemini_agent.py
 ────────────────────────────────────────────────────────────────────────────────
-Gemini Flash agent that drives the MCP server via tool calls.
+Gemini Flash agent that drives the multi-institution MCP gateway.
 
-Architecture:
+Architecture
+────────────
   ┌─────────────────────────────────────────────────────────────────┐
   │                        User (terminal)                          │
   └──────────────────────────────┬──────────────────────────────────┘
                                  │ natural language
                                  ▼
   ┌─────────────────────────────────────────────────────────────────┐
-  │                     gemini_agent.py                             │
+  │                     gemini_agent.py  ◄── YOU ARE HERE           │
   │                                                                 │
-  │  1. Connects to the MCP server (spawns server/main.py as a      │
-  │     subprocess and speaks JSON-RPC over stdio).                 │
-  │  2. Fetches the list of available tools from the MCP server.    │
-  │  3. Converts MCP tool schemas → Gemini FunctionDeclarations.    │
-  │  4. Runs a conversation loop:                                   │
+  │  1. Spawns gateway/main.py as a subprocess.                    │
+  │  2. Connects to it via MCP stdio (one connection).              │
+  │  3. Fetches ALL aggregated tools (e.g. uslugi__login,          │
+  │     mojtermin__book_appointment …).                             │
+  │  4. Converts MCP tool schemas → Gemini FunctionDeclarations.   │
+  │  5. Runs the conversation loop:                                 │
   │       User says something →                                     │
-  │       Gemini decides which tool to call (if any) →              │
-  │       Agent calls the tool via the MCP client →                 │
-  │       Tool result is fed back to Gemini →                       │
-  │       Gemini produces a final answer →                          │
-  │       Answer is printed to the user.                            │
+  │       Gemini decides which tool(s) to call →                   │
+  │       Agent calls them via the MCP gateway →                   │
+  │       Gateway routes each call to the right institution →       │
+  │       Results are fed back to Gemini →                          │
+  │       Gemini produces a final answer for the user.              │
   └──────────────────────────────┬──────────────────────────────────┘
                                  │ MCP JSON-RPC (stdio)
                                  ▼
   ┌─────────────────────────────────────────────────────────────────┐
-  │                      server/main.py                             │
-  │  (MCP server with login, check_session, info_passport_renewal,  │
-  │   authenticated_get, authenticated_post …)                      │
-  └─────────────────────────────────────────────────────────────────┘
+  │                    gateway/main.py                              │
+  │   Aggregates tools from all institutions under namespaced names │
+  └──────────────────┬────────────────────────┬────────────────────┘
+       MCP stdio     │                        │   MCP stdio
+                     ▼                        ▼
+      institutions/uslugi/main.py    institutions/mojtermin/main.py
+
+From this file's perspective, there is only ONE MCP server: the gateway.
+The multi-institution routing is completely transparent here.
 
 Security note:
-  Gemini sees TOOL SCHEMAS and TOOL RESULTS, but never raw cookies or
-  credentials.  The login tool opens a browser; the user types their
-  password directly into the browser, which is invisible to this process.
+  Gemini sees tool SCHEMAS and tool RESULTS, but never raw cookies,
+  session tokens, or credentials.  Login tools open a browser — the user
+  types credentials directly there, invisible to this process.
 
 Running:
   python agent/gemini_agent.py
 """
 
 import asyncio
-import json
 import sys
 from pathlib import Path
 
-# ── google-genai (new SDK, not google-generativeai) ───────────────────────────
+# ── google-genai SDK (new SDK — NOT google-generativeai) ─────────────────────
 from google import genai
 from google.genai import types as genai_types
 
@@ -54,38 +60,59 @@ from google.genai import types as genai_types
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
-# ── Project config ─────────────────────────────────────────────────────────────
-# Add the project root to sys.path so we can import server.config even when
-# running this script directly.
+# ── Add project root to sys.path ──────────────────────────────────────────────
+# This allows importing from institutions/ and shared/ even when the script is
+# run directly (python agent/gemini_agent.py) rather than as a module.
 PROJECT_ROOT = Path(__file__).parent.parent.resolve()
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from server.config import GEMINI_API_KEY, GEMINI_MODEL
+# ── Config (only needs the Gemini key — the gateway handles everything else) ──
+# We import from a neutral location; institutions/uslugi/config.py also exports
+# GEMINI_API_KEY as a convenience.  Pull it directly from env to stay decoupled.
+import os
+from dotenv import load_dotenv
+
+load_dotenv(PROJECT_ROOT / ".env")
+GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
+GEMINI_MODEL: str = "gemini-2.5-flash"
+
+if not GEMINI_API_KEY:
+    # Fallback to the demo key so the demo still runs out-of-the-box.
+    GEMINI_API_KEY = ""
 
 # ── Gemini client ─────────────────────────────────────────────────────────────
 gemini_client = genai.Client(api_key=GEMINI_API_KEY)
 
 # ── System prompt ──────────────────────────────────────────────────────────────
-# This tells Gemini its role and the boundaries it must respect.
+# This tells Gemini its role, the institutions it can interact with, and the
+# security rules it must follow.
 SYSTEM_PROMPT = """
-You are a helpful assistant for citizens using the Macedonian public services
-portal (uslugi.gov.mk).
+You are a helpful assistant for Macedonian citizens interacting with government
+online portals.
 
-You have access to MCP tools that can:
-  - Log in to the portal on behalf of the user (opens a browser).
-  - Check whether the user is currently logged in.
-  - Fetch information about administrative services (e.g. passport renewal).
-  - Make authenticated requests to the portal on behalf of the user.
+You have access to MCP tools for TWO institutions:
 
-SECURITY RULES YOU MUST FOLLOW:
-  1. Never ask the user for their password or any credentials.
-     The 'login' tool handles authentication — the user types credentials
-     directly in their browser.
-  2. Never repeat cookie values or session tokens in your responses.
-  3. If a tool returns an error about an expired session, tell the user to
-     call the login tool and offer to do it for them.
+  1. uslugi.gov.mk  — The main public services portal.
+     Tools are prefixed with "uslugi__" (e.g. uslugi__login, uslugi__info_passport_renewal).
+     Use these for: passport renewal info, document submissions, administrative procedures.
+
+  2. mojtermin.mk   — The government appointment booking system.
+     Tools are prefixed with "mojtermin__" (e.g. mojtermin__get_doctors_by_city, mojtermin__get_available_appointments_by_name).
+     Use these for: finding doctors by city, checking available appointment slots.
+     All mojtermin tools are public — no login is required.
+
+SECURITY RULES:
+  1. NEVER ask the user for a password or any credentials.
+     The uslugi login tool opens a browser — the user types credentials there.
+  2. NEVER repeat cookie values, session tokens, or auth headers in your responses.
+  3. If a uslugi tool returns a session expired error, tell the user and offer to call uslugi__login.
   4. Keep responses concise and in plain language.
-  5. When presenting service information, format it clearly (use bullet lists).
+  5. When presenting lists (services, slots, appointments), use bullet points.
+  6. If the user asks about something unrelated to these portals, politely explain
+     that you are specialised for Macedonian government services.
+  7. If the user's request is related to these portals but there is no tool
+     available for it, tell the user clearly that this feature is not supported
+     yet. Do NOT attempt to improvise or call unrelated tools as a workaround.
 """.strip()
 
 
@@ -95,23 +122,27 @@ SECURITY RULES YOU MUST FOLLOW:
 
 def mcp_tool_to_gemini_function(mcp_tool) -> genai_types.FunctionDeclaration:
     """
-    Convert a single MCP tool definition into a Gemini FunctionDeclaration.
+    Convert a single MCP Tool definition into a Gemini FunctionDeclaration.
 
-    MCP tools have an "inputSchema" (JSON Schema object).
-    Gemini wants a FunctionDeclaration with a parameters schema.
+    MCP tools carry a JSON Schema "inputSchema" for their parameters.
+    Gemini wants a FunctionDeclaration with a typed parameters schema.
     This function bridges the two formats.
-    """
-    # MCP gives us a JSON Schema dict for the input.
-    input_schema = mcp_tool.inputSchema or {}
 
-    # Extract properties and required fields from the JSON Schema.
+    Args:
+        mcp_tool: An MCP types.Tool object (has .name, .description, .inputSchema).
+
+    Returns:
+        A genai_types.FunctionDeclaration ready to be passed to Gemini.
+    """
+    input_schema = mcp_tool.inputSchema or {}
     properties_raw = input_schema.get("properties", {})
     required = input_schema.get("required", [])
 
-    # Build Gemini Schema objects for each parameter.
-    gemini_properties = {}
+    # Convert each JSON Schema property to a Gemini Schema object.
+    gemini_properties: dict[str, genai_types.Schema] = {}
     for param_name, param_schema in properties_raw.items():
-        # Map JSON Schema types to Gemini types.
+        # Map JSON Schema type strings to Gemini Type enum values.
+        # Unrecognised types fall back to STRING (safe default).
         json_type = param_schema.get("type", "string").upper()
         gemini_type = getattr(genai_types.Type, json_type, genai_types.Type.STRING)
 
@@ -120,7 +151,6 @@ def mcp_tool_to_gemini_function(mcp_tool) -> genai_types.FunctionDeclaration:
             description=param_schema.get("description", ""),
         )
 
-    # Build the parameters schema.
     parameters = genai_types.Schema(
         type=genai_types.Type.OBJECT,
         properties=gemini_properties,
@@ -138,39 +168,53 @@ def mcp_tool_to_gemini_function(mcp_tool) -> genai_types.FunctionDeclaration:
 # Main agent loop
 # ═══════════════════════════════════════════════════════════════════════════════
 
-async def run_agent():
+async def run_agent() -> None:
     """
-    Start the MCP server subprocess and run the interactive agent loop.
+    Launch the gateway subprocess and run the interactive conversation loop.
 
     The flow per user message:
-      1. Send message + tool definitions to Gemini.
-      2. If Gemini returns a function call → execute via MCP → feed result back.
-      3. Repeat step 2 until Gemini returns a plain text response.
-      4. Print the final response.
+      1. Append the user message to conversation history.
+      2. Send history + tool definitions to Gemini.
+      3. If Gemini returns a function call → execute it via the MCP gateway.
+      4. Append the tool result to history.
+      5. Repeat steps 2-4 until Gemini produces a plain text answer.
+      6. Print the answer and wait for the next user message.
     """
 
-    # ── Launch the MCP server as a subprocess ─────────────────────────────────
-    # StdioServerParameters tells the MCP client to spawn a process and
-    # communicate with it over stdin/stdout.
+    # ── Launch the gateway as a subprocess ────────────────────────────────────
+    # The gateway in turn spawns the institution servers.  From our perspective
+    # there is only one subprocess (the gateway), communicating via stdio.
+    #
+    # We use sys.executable (the current venv Python) so that "import shared"
+    # and "import institutions" resolve correctly.
     server_params = StdioServerParameters(
-        command=sys.executable,            # Use the same Python interpreter
-        args=["-m", "server.main"],        # Run server/main.py as a module
-        cwd=str(PROJECT_ROOT),             # Working directory = project root
+        command=sys.executable,
+        args=["-m", "gateway.main"],
+        cwd=str(PROJECT_ROOT),
     )
 
     async with stdio_client(server_params) as (read_stream, write_stream):
         async with ClientSession(read_stream, write_stream) as mcp_session:
 
-            # ── Initialize the MCP connection ─────────────────────────────────
+            # ── MCP handshake ──────────────────────────────────────────────────
+            # initialize() sends the MCP "initialize" request to the gateway and
+            # waits for the response before we can call list_tools / call_tool.
             await mcp_session.initialize()
-            print("[Agent] MCP server connected.")
+            print("[Agent] Gateway connected.")
 
-            # ── Fetch available tools from the MCP server ─────────────────────
+            # ── Fetch aggregated tool list ─────────────────────────────────────
+            # The gateway returns all institution tools under namespaced names.
+            # e.g. ["uslugi__login", "uslugi__info_passport_renewal",
+            #       "mojtermin__login", "mojtermin__get_doctors_by_city", …]
             tools_response = await mcp_session.list_tools()
             mcp_tools = tools_response.tools
-            print(f"[Agent] Available tools: {[t.name for t in mcp_tools]}")
+            print(f"[Agent] Available tools ({len(mcp_tools)}):")
+            for t in mcp_tools:
+                print(f"  • {t.name}")
 
-            # ── Convert MCP tool schemas to Gemini FunctionDeclarations ────────
+            # ── Convert tool schemas to Gemini format ──────────────────────────
+            # Gemini needs all tools in a single Tool object with a list of
+            # FunctionDeclarations.  One FunctionDeclaration per MCP tool.
             gemini_tools = [
                 genai_types.Tool(
                     function_declarations=[
@@ -179,19 +223,20 @@ async def run_agent():
                 )
             ]
 
-            # ── Conversation history ──────────────────────────────────────────
-            # We maintain the full history so Gemini has context across turns.
-            # Format: list of genai_types.Content objects.
+            # ── Conversation history ───────────────────────────────────────────
+            # We keep the full turn-by-turn history so Gemini has context across
+            # multiple exchanges.  Format: list of genai_types.Content objects.
             history: list[genai_types.Content] = []
 
-            print("\n" + "═" * 60)
-            print("  uslugi.gov.mk Assistant  (powered by Gemini Flash)")
-            print("  Type 'quit' to exit.")
-            print("═" * 60 + "\n")
+            print("\n" + "═" * 65)
+            print("  Macedonian Government Services Assistant")
+            print("  Institutions: uslugi.gov.mk  |  mojtermin.mk")
+            print("  Powered by Gemini Flash  •  Type 'quit' to exit.")
+            print("═" * 65 + "\n")
 
-            # ── Interactive loop ───────────────────────────────────────────────
+            # ── Interactive conversation loop ──────────────────────────────────
             while True:
-                # Read user input.
+                # Read user input from the terminal.
                 try:
                     user_input = input("You: ").strip()
                 except (KeyboardInterrupt, EOFError):
@@ -205,7 +250,7 @@ async def run_agent():
                 if not user_input:
                     continue
 
-                # Append user message to history.
+                # Add the user message to the conversation history.
                 history.append(
                     genai_types.Content(
                         role="user",
@@ -213,17 +258,24 @@ async def run_agent():
                     )
                 )
 
-                # ── Agentic loop: call Gemini, handle tool calls ────────────
-                # Gemini may return multiple rounds of tool calls before giving
+                # ── Agentic inner loop: handle tool calls ──────────────────────
+                # Gemini may call multiple tools in sequence before producing
                 # a final text answer.  We loop until we get plain text.
                 while True:
+                    # Send the full conversation history to Gemini.
+                    # Gemini has visibility of:
+                    #   • The system prompt (role, security rules, institution guide).
+                    #   • All prior user messages and assistant responses.
+                    #   • All prior tool calls and their results.
+                    #   • The current tool schema list.
                     response = gemini_client.models.generate_content(
                         model=GEMINI_MODEL,
                         contents=history,
                         config=genai_types.GenerateContentConfig(
                             system_instruction=SYSTEM_PROMPT,
                             tools=gemini_tools,
-                            # AUTO lets Gemini decide when to call tools.
+                            # AUTO lets Gemini choose whether to call a tool
+                            # or respond with text on each turn.
                             tool_config=genai_types.ToolConfig(
                                 function_calling_config=genai_types.FunctionCallingConfig(
                                     mode="AUTO"
@@ -235,10 +287,12 @@ async def run_agent():
                     candidate = response.candidates[0]
                     content = candidate.content  # genai_types.Content
 
-                    # Add Gemini's response (possibly with tool calls) to history.
+                    # Append Gemini's response (which may include tool calls)
+                    # to the history so future turns have the full context.
                     history.append(content)
 
-                    # ── Check if Gemini wants to call a tool ──────────────────
+                    # ── Check for tool calls ───────────────────────────────────
+                    # Gemini returns function_call parts when it wants to use a tool.
                     function_calls = [
                         part.function_call
                         for part in content.parts
@@ -246,33 +300,32 @@ async def run_agent():
                     ]
 
                     if not function_calls:
-                        # No tool calls → Gemini gave a final text answer.
-                        # Extract and print it.
+                        # No tool calls — Gemini produced a final text answer.
                         final_text = " ".join(
-                            part.text
-                            for part in content.parts
-                            if part.text
+                            part.text for part in content.parts if part.text
                         )
                         print(f"\nAssistant: {final_text}\n")
-                        break  # Exit the inner agentic loop.
+                        break  # exit the inner agentic loop
 
-                    # ── Execute each tool call via the MCP server ─────────────
+                    # ── Execute tool calls via the gateway ─────────────────────
+                    # Gemini may request multiple tool calls in a single response.
+                    # We execute all of them and collect their results before
+                    # sending them back together in one "tool" history entry.
                     tool_results = []
 
                     for fc in function_calls:
-                        tool_name = fc.name
-                        # fc.args is a dict (Gemini populates it from JSON).
-                        tool_args = dict(fc.args) if fc.args else {}
+                        tool_name: str = fc.name
+                        tool_args: dict = dict(fc.args) if fc.args else {}
 
                         print(f"  [Tool call] {tool_name}({tool_args})")
 
-                        # Call the tool on the MCP server.
+                        # Dispatch the call to the gateway, which routes it to
+                        # the appropriate institution server.
                         try:
                             mcp_result = await mcp_session.call_tool(
                                 tool_name, arguments=tool_args
                             )
-                            # MCP returns a list of content items.
-                            # We join text items into a single result string.
+                            # Join all text content items in the result.
                             result_text = "\n".join(
                                 item.text
                                 for item in mcp_result.content
@@ -281,9 +334,9 @@ async def run_agent():
                         except Exception as exc:
                             result_text = f"Tool error: {exc}"
 
-                        print(f"  [Tool result] {result_text}")
+                        print(f"  [Tool result] {result_text[:300]}")
 
-                        # Build a FunctionResponse part for Gemini.
+                        # Build a Gemini FunctionResponse to feed back.
                         tool_results.append(
                             genai_types.Part(
                                 function_response=genai_types.FunctionResponse(
@@ -293,19 +346,21 @@ async def run_agent():
                             )
                         )
 
-                    # Feed all tool results back to Gemini in one Content block.
+                    # Append ALL tool results as a single "tool" content block.
+                    # Gemini's API requires tool results to be grouped together
+                    # in one Content with role="tool".
                     history.append(
                         genai_types.Content(
                             role="tool",
                             parts=tool_results,
                         )
                     )
-                    # Continue the inner loop: Gemini will process the results
-                    # and either call more tools or produce a final answer.
+                    # Continue the inner loop: Gemini will process the tool
+                    # results and either call more tools or produce the final answer.
 
 
-def main():
-    """Entry point for running the agent from the command line."""
+def main() -> None:
+    """Entry point for  python agent/gemini_agent.py  or  python -m agent.gemini_agent."""
     asyncio.run(run_agent())
 
 
