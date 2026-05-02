@@ -23,94 +23,26 @@ Adding new tools:
 
 from mcp.server.fastmcp import FastMCP
 
-# ── Tool implementations ──────────────────────────────────────────────────────
-from institutions.uslugi.tools.passport import info_passport_renewal as _info_passport_renewal
-from institutions.uslugi.tools.session_tools import (
-    login as _login,
-    logout as _logout,
-    check_session as _check_session,
+from institutions.uslugi.service_registry import SERVICES
+from institutions.uslugi.tools.service_details import (
+    get_service_details,
 )
 
-# ── Create the FastMCP server instance ───────────────────────────────────────
-# The name here is only used in MCP handshake metadata — it is NOT the
-# tool prefix.  The gateway adds the "uslugi__" prefix when it registers
-# these tools in its own namespace.
-mcp = FastMCP("uslugi-gov-mk")
+mcp = FastMCP("uslugi")
+
+for service_id, slug in SERVICES.items():
+    def make_tool(sid, sslug):
+        @mcp.tool(
+            name=f"info_{sslug}",
+            description=f"Get information for {sslug}",
+        )
+        def tool():
+            return get_service_details(sid)
+
+        return tool
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# SESSION TOOLS
-# Control the authentication lifecycle.  The LLM can call these but never
-# sees passwords or raw cookie values.
-# ═══════════════════════════════════════════════════════════════════════════════
+    make_tool(service_id, slug)
 
-@mcp.tool()
-def login() -> dict:
-    """
-    Authenticate the user on uslugi.gov.mk via browser and save the session.
-
-    Opens a Chromium window for the user to complete the eid.mk SSO login.
-
-    Returns:
-        { "success": bool, "message": str, "strategy_used": str, "cookies_saved": int }
-    """
-    return _login()
-
-
-@mcp.tool()
-def logout() -> dict:
-    """
-    Log out of uslugi.gov.mk by deleting the stored session cookies.
-
-    Returns:
-        { "success": bool, "message": str }
-    """
-    return _logout()
-
-
-@mcp.tool()
-def check_session() -> dict:
-    """
-    Check whether an active session exists for uslugi.gov.mk.
-
-    This is a local file check — it does NOT make a network request.
-    Call this before authenticated requests to surface a friendly error
-    instead of an unexpected HTTP failure.
-
-    Returns:
-        { "active": bool, "saved_at": str | None, "message": str }
-    """
-    return _check_session()
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# PUBLIC INFORMATION TOOLS
-# These do not require authentication.
-# ═══════════════════════════════════════════════════════════════════════════════
-
-@mcp.tool()
-def info_passport_renewal() -> dict:
-    """
-    Fetch detailed information about the passport renewal service (ID 5200)
-    from uslugi.gov.mk.
-
-    No login required — this endpoint is publicly accessible.
-
-    Returns a dict with:
-        name, description, requirements, conditions, deadlines,
-        delivery_in, delivery_out, contact, applyUrl.
-    """
-    return _info_passport_renewal()
-
-
-
-# ── Entry point ───────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    # mcp.run() starts the stdio transport loop.
-    # This process will block, reading MCP JSON-RPC from stdin and writing
-    # responses to stdout until the parent process (the gateway) closes the pipe.
     mcp.run()
-
-# sakam da apliciram za izvod
-# llm
-#
