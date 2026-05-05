@@ -30,6 +30,11 @@ from institutions.uslugi.tools.session_tools import (
     logout as _logout,
     check_session as _check_session,
 )
+from institutions.uslugi.tools.discovery import (
+    search_portal as _search,
+    get_group_contents as _get_group,
+    get_service_details as _get_details
+)
 # from institutions.uslugi.tools.mvr_info import (
 #     info_mvr_passport_renewal,
 #     info_mvr_passport_lost,
