@@ -30,6 +30,12 @@ from institutions.uslugi.tools.session_tools import (
     logout as _logout,
     check_session as _check_session,
 )
+# Import the new Discovery Logic
+from institutions.uslugi.tools.discovery import (
+    search_portal as _search,
+    get_group_contents as _get_group,
+    get_service_details as _get_details
+)
 
 # ── Create the FastMCP server instance ───────────────────────────────────────
 # The name here is only used in MCP handshake metadata — it is NOT the
@@ -103,6 +109,30 @@ def info_passport_renewal() -> dict:
     return _info_passport_renewal()
 
 
+@mcp.tool()
+def search_services(query: str) -> list[dict]:
+    """
+    Search the portal for services (e.g., 'passport', 'driver license').
+    Returns a list of results. If a result has 'is_group': true,
+    you MUST call get_group_contents(id) to see the specific services inside.
+    """
+    return _search(query)
+
+@mcp.tool()
+def get_group_contents(group_id: int) -> list[dict]:
+    """
+    Lists all specific services within a service category/group.
+    Call this when search_services indicates a result is a group.
+    """
+    return _get_group(group_id)
+
+@mcp.tool()
+def get_service_requirements(service_id: int) -> dict:
+    """
+    Fetches the documents, price, and application link for a specific service ID.
+    Call this once you have identified the exact service the user wants.
+    """
+    return _get_details(service_id)
 
 # ── Entry point ───────────────────────────────────────────────────────────────
 if __name__ == "__main__":
