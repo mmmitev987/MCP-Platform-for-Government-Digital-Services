@@ -15,31 +15,104 @@ Available tools:
       doctor_name, date)                               doctor on a given date
 """
 
+import re
 import requests
-from datetime import datetime
+from collections import defaultdict
+from datetime import datetime, timedelta
 
 
-# ── Private helpers ───────────────────────────────────────────────────────────
+# ── Shared helpers (used by all tool modules) ─────────────────────────────────
 
-def _get_json(path: str):
+# Digraphs first so 'sh' beats 's'+'h', etc.
+_LATIN = sorted({
+    'sh': 'ш', 'zh': 'ж', 'ch': 'ч', 'dj': 'џ', 'gj': 'ѓ', 'kj': 'ќ',
+    'lj': 'љ', 'nj': 'њ', 'dz': 'ѕ',
+    'a': 'а', 'b': 'б', 'c': 'ц', 'd': 'д', 'e': 'е', 'f': 'ф', 'g': 'г',
+    'h': 'х', 'i': 'и', 'j': 'ј', 'k': 'к', 'l': 'л', 'm': 'м', 'n': 'н',
+    'o': 'о', 'p': 'п', 'q': 'ќ', 'r': 'р', 's': 'с', 't': 'т', 'u': 'у',
+    'v': 'в', 'w': 'в', 'x': 'кс', 'y': 'и', 'z': 'з',
+}.items(), key=lambda x: -len(x[0]))
+
+_cache: dict = {}
+
+
+class MojTerminError(Exception):
+    """Custom exception for mojtermin.mk API errors."""
+    pass
+
+
+def normalize(text: str) -> str:
+    """Convert Latin text to Cyrillic and lowercase for case-insensitive matching."""
+    text = text.lower()
+    for lat, cyr in _LATIN:
+        text = text.replace(lat, cyr)
+    return text
+
+
+def _pat(text: str) -> re.Pattern:
+    """Build a regex pattern from text after normalization."""
+    return re.compile(re.escape(normalize(text)), re.IGNORECASE)
+
+
+def _get(path: str):
     """
-    Perform a plain GET to mojtermin.mk and return the parsed JSON body.
+    Perform a GET to mojtermin.mk with error handling and JSON parsing.
 
     Args:
         path: URL path starting with "/", e.g. "/api/pp/side_navigation".
+
+    Returns:
+        Parsed JSON response.
+
+    Raises:
+        MojTerminError: On timeout, HTTP error, network error, or invalid JSON.
     """
     url = "https://mojtermin.mk" + path
-    headers = {
-        "Accept": "application/json",
-        "User-Agent": "Mozilla/5.0",
-    }
-    response = requests.get(url, headers=headers)
-    return response.json()
+    try:
+        r = requests.get(
+            url,
+            headers={"Accept": "application/json", "User-Agent": "Mozilla/5.0"},
+            timeout=10,
+        )
+        r.raise_for_status()
+        return r.json()
+    except requests.exceptions.Timeout:
+        raise MojTerminError(f"Timeout: {url}")
+    except requests.exceptions.HTTPError:
+        raise MojTerminError(f"HTTP {r.status_code}: {url}")
+    except requests.exceptions.RequestException as e:
+        raise MojTerminError(f"Network error: {e}")
+    except ValueError:
+        raise MojTerminError(f"Invalid JSON: {url}")
+
+
+def _cached(key: str, path: str):
+    """Fetch from cache or API."""
+    if key not in _cache:
+        _cache[key] = _get(path)
+    return _cache[key]
+
+
+def _nav() -> list:
+    """Return the full side-navigation tree (cached)."""
+    return _cached("nav", "/api/pp/side_navigation")
+
+
+def _flat() -> list:
+    """Flatten the nav tree into a single list of all nodes (cached)."""
+    if "flat" not in _cache:
+        stack, result = list(_nav()), []
+        while stack:
+            node = stack.pop()
+            result.append(node)
+            stack.extend(node.get("subsections", []))
+        _cache["flat"] = result
+    return _cache["flat"]
 
 
 def is_doctor(name: str) -> bool:
     """
-    Heuristic: a resource is a doctor if its name is 2–3 all-uppercase words.
+    Heuristic: a resource is a doctor if its name is 2-3 all-uppercase words.
     Filters out rooms, equipment, and other non-person resources in the nav tree.
 
     Examples:
@@ -52,6 +125,29 @@ def is_doctor(name: str) -> bool:
     return 2 <= len(words) <= 3 and all(word.isupper() for word in words)
 
 
+def _parse_slots(data: dict) -> list[dict]:
+    """
+    Extract bookable appointment slots from the raw API response.
+
+    Returns a sorted list of {"date": "YYYY-MM-DD", "time": "HH:MM"} dicts.
+    """
+    slots = []
+    for day in data.get("timeslots", {}).values():
+        for s in day:
+            try:
+                kind = int(s.get("timeslotType", -1))
+            except (TypeError, ValueError):
+                continue
+            if kind not in (0, 1):
+                continue
+            term = s.get("term", "")
+            if "T" not in term:
+                continue
+            date, time = term.split("T", 1)
+            slots.append({"date": date, "time": time[:5]})
+    return sorted(slots, key=lambda s: (s["date"], s["time"]))
+
+
 # ── Public tools ──────────────────────────────────────────────────────────────
 
 def get_locations() -> dict:
@@ -61,27 +157,25 @@ def get_locations() -> dict:
     Returns a dict keyed by location ID, each value containing location metadata
     (name, address, etc.) as returned by the API.
     """
-    url = "https://mojtermin.mk/api/pp/locations"
-    return requests.get(url).json()
+    return _cached("locations", "/api/pp/locations")
 
 
 def get_location_by_name(name: str) -> dict | None:
     """
-    Find a single location whose name contains the given string (case-insensitive).
+    Find a single location whose name contains the given string (case-insensitive,
+    with Latin-to-Cyrillic normalization).
 
     Args:
-        name: Partial or full location name to search for, e.g. "СТРУГА".
+        name: Partial or full location name to search for, e.g. "СТРУГА" or "STRUGA".
 
     Returns:
         The location dict if found, or None if no match.
     """
-    data = get_locations()
-
-    for loc in data.values():
-        if name.lower() in loc["name"].lower():
-            return loc
-
-    return None
+    pattern = _pat(name)
+    return next(
+        (loc for loc in get_locations().values() if pattern.search(normalize(loc["name"]))),
+        None,
+    )
 
 
 def get_specialties() -> list[str]:
@@ -91,19 +185,7 @@ def get_specialties() -> list[str]:
     Traverses the portal's side-navigation tree and collects every node
     whose type is "specialty".
     """
-    data = _get_json("/api/pp/side_navigation")
-
-    specialties = []
-
-    def traverse(items):
-        for item in items:
-            if item.get("type") == "specialty":
-                specialties.append(item["name"])
-            if "subsections" in item:
-                traverse(item["subsections"])
-
-    traverse(data)
-    return specialties
+    return [n["name"] for n in _flat() if n.get("type") == "specialty"]
 
 
 def get_doctors() -> list[str]:
@@ -111,23 +193,12 @@ def get_doctors() -> list[str]:
     Return a sorted, deduplicated list of all doctor names across the entire portal.
 
     Identifies doctors using the is_doctor() heuristic: resource nodes whose
-    names are 2–3 fully uppercase words.
+    names are 2-3 fully uppercase words.
     """
-    data = _get_json("/api/pp/side_navigation")
-
-    doctors = []
-
-    def traverse(items):
-        for item in items:
-            if item.get("type") == "resource":
-                name = item["name"]
-                if is_doctor(name):
-                    doctors.append(name)
-            if "subsections" in item:
-                traverse(item["subsections"])
-
-    traverse(data)
-    return sorted(set(doctors))
+    return sorted({
+        n["name"] for n in _flat()
+        if n.get("type") == "resource" and is_doctor(n["name"])
+    })
 
 
 def get_doctors_by_city(city_name: str) -> list[dict]:
@@ -135,34 +206,26 @@ def get_doctors_by_city(city_name: str) -> list[dict]:
     Return all doctors in a given city, along with their clinic name.
 
     Args:
-        city_name: City to filter by, e.g. "СТРУГА". Case-insensitive.
+        city_name: City to filter by, e.g. "СТРУГА". Case-insensitive,
+                   supports Latin input (e.g. "Struga" → "Струга").
 
     Returns:
         List of dicts, each with keys: "doctor", "clinic", "city".
         Sorted alphabetically by doctor name.
     """
-    data = _get_json("/api/pp/side_navigation")
-
+    pattern = _pat(city_name)
     results = []
-
-    def traverse(items):
-        for item in items:
-            # Match a location node whose name contains the city.
-            if item.get("type") == "location" and city_name.lower() in item["name"].lower():
-                for clinic in item.get("subsections", []):
-                    clinic_name = clinic["name"]
-                    for resource in clinic.get("subsections", []):
-                        name = resource["name"]
-                        if is_doctor(name):
-                            results.append({
-                                "doctor": name,
-                                "clinic": clinic_name,
-                                "city": item["name"],
-                            })
-            if "subsections" in item:
-                traverse(item["subsections"])
-
-    traverse(data)
+    for node in _flat():
+        if node.get("type") != "location" or not pattern.search(normalize(node["name"])):
+            continue
+        for clinic in node.get("subsections", []):
+            for r in clinic.get("subsections", []):
+                if is_doctor(r["name"]):
+                    results.append({
+                        "doctor": r["name"],
+                        "clinic": clinic["name"],
+                        "city": node["name"],
+                    })
     results.sort(key=lambda x: x["doctor"])
     return results
 
@@ -180,46 +243,35 @@ def get_available_appointments_by_name(city: str, doctor_name: str, date: str) -
         Dict with keys "doctor", "date", "available_slots" (list of "HH:MM" strings),
         or the string "Doctor not found" if no match.
     """
-    data = _get_json("/api/pp/side_navigation")
+    city_pat = _pat(city)
+    doc_pat = _pat(doctor_name)
 
     doctor_id = None
     found_doctor = None
 
-    def traverse(items):
-        nonlocal doctor_id, found_doctor
-
-        for item in items:
-            if item.get("type") == "location" and city.lower() in item["name"].lower():
-                for clinic in item.get("subsections", []):
-                    for resource in clinic.get("subsections", []):
-                        name = resource["name"]
-                        if is_doctor(name) and doctor_name.lower() in name.lower():
-                            doctor_id = resource.get("id")
-                            found_doctor = name
-                            return
-            if "subsections" in item:
-                traverse(item["subsections"])
-
-    traverse(data)
+    for node in _flat():
+        if node.get("type") != "location" or not city_pat.search(normalize(node["name"])):
+            continue
+        for clinic in node.get("subsections", []):
+            for resource in clinic.get("subsections", []):
+                if is_doctor(resource["name"]) and doc_pat.search(normalize(resource["name"])):
+                    doctor_id = resource.get("id")
+                    found_doctor = resource["name"]
+                    break
+            if doctor_id:
+                break
+        if doctor_id:
+            break
 
     if not doctor_id:
         return "Doctor not found"
 
-    # Fetch the slot availability calendar for this doctor.
-    url = f"https://mojtermin.mk/api/pp/resources/{doctor_id}/slots_availability"
-    headers = {"Accept": "application/json", "User-Agent": "Mozilla/5.0"}
-    slots_data = requests.get(url, headers=headers).json()
+    slots_data = _get(f"/api/pp/resources/{doctor_id}/slots_availability")
 
-    available = []
-
-    for key in slots_data["timeslots"]:
-        for slot in slots_data["timeslots"][key]:
-            slot_date = slot["term"].split("T")[0]
-
-            # timeslotType 0 and 1 are bookable (0 = normal, 1 = first visit).
-            if slot_date == date and slot["timeslotType"] in [0, 1]:
-                time = slot["term"].split("T")[1][:5]
-                available.append(time)
+    available = [
+        s["time"] for s in _parse_slots(slots_data)
+        if s["date"] == date
+    ]
 
     return {
         "doctor": found_doctor,

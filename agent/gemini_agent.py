@@ -96,10 +96,14 @@ You have access to MCP tools for TWO institutions:
      Tools are prefixed with "uslugi__" (e.g. uslugi__login, uslugi__info_passport_renewal).
      Use these for: passport renewal info, document submissions, administrative procedures.
 
-  2. mojtermin.mk   — The government appointment booking system.
-     Tools are prefixed with "mojtermin__" (e.g. mojtermin__get_doctors_by_city, mojtermin__get_available_appointments_by_name).
-     Use these for: finding doctors by city, checking available appointment slots.
-     All mojtermin tools are public — no login is required.
+   2. mojtermin.mk   — The government appointment booking system.
+      Tools are prefixed with "mojtermin__" (e.g. mojtermin__get_doctors_by_city,
+      mojtermin__get_available_slots, mojtermin__search_resources, mojtermin__get_first_available).
+      Use these for: finding doctors, clinics, and locations by name or city;
+      searching resources; checking available appointment slots on a specific date,
+      across a date range, or finding the first available slot; viewing availability
+      summaries; checking all slots in a city on a given date.
+      All mojtermin tools are public — no login is required.
 
 SECURITY RULES:
   1. NEVER ask the user for a password or any credentials.

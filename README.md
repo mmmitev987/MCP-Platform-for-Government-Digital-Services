@@ -33,7 +33,7 @@ gateway/main.py  (aggregates all institutions under namespaced tool names)
     │                          │
     ▼                          ▼
 institutions/uslugi/       institutions/mojtermin/
-main.py (88 tools)         main.py (6 tools)
+main.py (88 tools)         main.py (15 tools)
 ```
 
 Each institution server is a **FastMCP** process. The gateway spawns them as subprocesses on startup and multiplexes their tools under a `institutionname__toolname` namespace (e.g. `uslugi__mvr_info_passport_renewal`, `mojtermin__get_doctors_by_city`).
@@ -84,7 +84,9 @@ MCP-Platform-for-Government-Digital-Services/
 │   └── mojtermin/                  # mojtermin.mk — government appointment booking
 │       ├── main.py                 # FastMCP server, registers all mojtermin tools
 │       └── tools/
-│           └── appointments.py     # get_locations, get_doctors, get_available_appointments …
+│           ├── appointments.py     # get_locations, get_doctors, get_available_appointments …
+│           ├── resources.py        # get_clinics, get_resources_by_city, search_resources …
+│           └── slots.py            # get_available_slots, get_slots_range, get_first_available …
 │
 ├── agent/
 │   └── gemini_agent.py             # Original CLI agent (still works standalone)
