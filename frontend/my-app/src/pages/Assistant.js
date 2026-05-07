@@ -1,12 +1,14 @@
 import { useEffect, useRef } from "react";
 import { useLocation } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { useChat } from "../hooks/useChat";
 import MessageBubble from "../components/chat/MessageBubble";
 import ChatInput from "../components/chat/ChatInput";
 import SuggestedQuestions from "../components/chat/SuggestedQuestions";
 
 export default function Assistant() {
-  const { messages, loading, error, send, reset, loadSession, sessionTitle } = useChat();
+  const { t } = useTranslation();
+  const { messages, loading, error, clearError, send, reset, loadSession, sessionTitle } = useChat();
   const bottomRef = useRef(null);
   const location = useLocation();
 
@@ -37,36 +39,34 @@ export default function Assistant() {
       {/* Header */}
       <div className="flex items-center justify-between px-6 py-4 border-b border-gray-800 bg-gray-900">
         <div>
-          <h2 className="text-white font-semibold">{sessionTitle || "AI Assistant"}</h2>
-          <p className="text-gray-500 text-xs">Powered by Gemini 2.5 Flash · Macedonian Government Services</p>
+          <h2 className="text-white font-semibold">{sessionTitle || t("assistant.title")}</h2>
+          <p className="text-gray-500 text-xs">{t("assistant.subtitle")}</p>
         </div>
         {!isEmpty && (
           <button
             onClick={reset}
             className="text-sm text-gray-400 hover:text-white border border-gray-700 hover:border-gray-600 px-3 py-1.5 rounded-lg transition-colors"
           >
-            New chat
+            {t("assistant.newChat")}
           </button>
         )}
       </div>
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-6 py-6">
+      <div className="flex-1 overflow-y-auto px-4 sm:px-6 py-4 sm:py-6">
         {isEmpty ? (
           <div className="flex flex-col items-center justify-center h-full text-center gap-6">
             <div>
               <div className="text-4xl mb-3">🏛️</div>
-              <h3 className="text-white text-lg font-semibold mb-2">How can I help you today?</h3>
-              <p className="text-gray-400 text-sm max-w-md">
-                Ask me anything about Macedonian government services — passport renewal, medical appointments, vehicle registration, and more.
-              </p>
+              <h3 className="text-white text-lg font-semibold mb-2">{t("assistant.emptyHeading")}</h3>
+              <p className="text-gray-400 text-sm max-w-md">{t("assistant.emptySubtitle")}</p>
             </div>
             <SuggestedQuestions onSelect={send} />
           </div>
         ) : (
           <div className="max-w-3xl mx-auto">
             {messages.map((m, i) => (
-              <MessageBubble key={i} role={m.role} content={m.content} />
+              <MessageBubble key={i} role={m.role} content={m.content} portalErrors={m.portalErrors} />
             ))}
             {loading && (
               <div className="flex justify-start mb-4">
@@ -80,14 +80,26 @@ export default function Assistant() {
                 </div>
               </div>
             )}
-            {error && <p className="text-red-400 text-sm text-center my-2">{error}</p>}
+            {error && (
+              <div className="flex items-start gap-3 px-4 py-3 mb-2 bg-red-950 border border-red-800 rounded-xl text-sm">
+                <span className="text-red-400 text-base flex-shrink-0">⚠</span>
+                <p className="flex-1 text-red-300">{error}</p>
+                <button
+                  onClick={clearError}
+                  className="text-red-600 hover:text-red-400 transition-colors flex-shrink-0 leading-none"
+                  aria-label={t("assistant.dismiss")}
+                >
+                  ✕
+                </button>
+              </div>
+            )}
             <div ref={bottomRef} />
           </div>
         )}
       </div>
 
       {/* Input */}
-      <div className="max-w-3xl w-full mx-auto">
+      <div className="max-w-3xl w-full mx-auto px-2 sm:px-0">
         <ChatInput onSend={send} disabled={loading} />
       </div>
     </div>

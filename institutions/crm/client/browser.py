@@ -43,6 +43,7 @@ from institutions.crm.config import (
     SEARCH_PAGE_URL,
     TYPING_DELAY_MS,
 )
+from institutions.shared.errors import tool_error
 
 
 class CRMBrowserClient:
@@ -122,6 +123,12 @@ class CRMBrowserClient:
             raise RuntimeError(
                 "CRMBrowserClient not started. Call await client.start() first."
             )
+
+    def _not_ready_error(self):
+        return tool_error(
+            "browser_error",
+            "The CRM browser session is not active. The server may still be starting up — please try again in a moment."
+        )
 
     # ── Response interception ─────────────────────────────────────────────────
 
@@ -217,25 +224,32 @@ class CRMBrowserClient:
         Returns:
             List of dicts — each has: fullName, fullNameLat, leid, municipality.
             Empty list if no matches found.
+            On error, returns a list with a single error dict.
         """
-        self._assert_ready()
+        if not self._ready:
+            return [self._not_ready_error()]
 
-        if SEARCH_PAGE_URL not in self._page.url:
-            await self._page.goto(SEARCH_PAGE_URL, wait_until="networkidle")
+        try:
+            if SEARCH_PAGE_URL not in self._page.url:
+                await self._page.goto(SEARCH_PAGE_URL, wait_until="networkidle")
 
-        # Register the listener BEFORE typing so we don't race the response.
-        response_task = asyncio.create_task(
-            self._wait_for_api_response("basicProfile")
-        )
+            # Register the listener BEFORE typing so we don't race the response.
+            response_task = asyncio.create_task(
+                self._wait_for_api_response("basicProfile")
+            )
 
-        await self._fill_search_box(name)
+            await self._fill_search_box(name)
 
-        data = await response_task
-        companies = data.get("companies", [])
-        # Cache leid → fullName so _click_company_row() can find rows by text.
-        for c in companies:
-            self._leid_to_name[c["leid"]] = c["fullName"]
-        return companies
+            data = await response_task
+            companies = data.get("companies", [])
+            # Cache leid → fullName so _click_company_row() can find rows by text.
+            for c in companies:
+                self._leid_to_name[c["leid"]] = c["fullName"]
+            return companies
+        except asyncio.TimeoutError:
+            return [tool_error("network_error", "crm.com.mk did not respond in time. Please try again.")]
+        except Exception as exc:
+            return [tool_error("unexpected_error", f"An unexpected error occurred while searching companies: {exc}")]
 
     async def get_company_details(self, leid: int) -> dict | str:
         """
@@ -253,7 +267,8 @@ class CRMBrowserClient:
             legal_form, legal_status, address, primary_activity, company_size.
             Returns "Company not found" if the leid is invalid or times out.
         """
-        self._assert_ready()
+        if not self._ready:
+            return self._not_ready_error()
 
         # The Angular app fires basicProfile/{leid}?sci={...} after navigation.
         # Response content-type is text/plain; body is a base64-encoded PNG —
@@ -280,7 +295,9 @@ class CRMBrowserClient:
                 timeout=RESPONSE_TIMEOUT_MS / 1000,
             )
         except asyncio.TimeoutError:
-            return "Company not found"
+            return tool_error("not_found", f"Company with ID {leid} was not found on crm.com.mk, or the page timed out.")
+        except Exception as exc:
+            return tool_error("unexpected_error", f"An unexpected error occurred while fetching company details: {exc}")
         finally:
             self._page.remove_listener("response", handler)
 
@@ -291,26 +308,29 @@ class CRMBrowserClient:
             try:
                 png_bytes = base64.b64decode(raw_body)
             except Exception:
-                return "Failed to decode company profile image"
+                return tool_error("parse_error", "Received the company profile but could not decode the image data.")
 
         # Send the PNG to Gemini Vision and ask it to extract the table fields.
-        ai = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
-        response = await asyncio.to_thread(
-            ai.models.generate_content,
-            model="gemini-2.0-flash",
-            contents=[
-                genai_types.Part.from_bytes(data=png_bytes, mime_type="image/png"),
-                (
-                    "This is a company registration record from the Central Registry "
-                    "of North Macedonia (ЦРРСМ). Extract every visible field and "
-                    "return them as a JSON object with English keys. "
-                    "Return only valid JSON — no markdown fences, no other text.\n\n"
-                    "Use these English key names:\n"
-                    "  full_name, short_name, embs, edb, founded_date,\n"
-                    "  legal_form, legal_status, address, primary_activity, company_size"
-                ),
-            ],
-        )
+        try:
+            ai = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
+            response = await asyncio.to_thread(
+                ai.models.generate_content,
+                model="gemini-2.0-flash",
+                contents=[
+                    genai_types.Part.from_bytes(data=png_bytes, mime_type="image/png"),
+                    (
+                        "This is a company registration record from the Central Registry "
+                        "of North Macedonia (ЦРРСМ). Extract every visible field and "
+                        "return them as a JSON object with English keys. "
+                        "Return only valid JSON — no markdown fences, no other text.\n\n"
+                        "Use these English key names:\n"
+                        "  full_name, short_name, embs, edb, founded_date,\n"
+                        "  legal_form, legal_status, address, primary_activity, company_size"
+                    ),
+                ],
+            )
+        except Exception as exc:
+            return tool_error("unexpected_error", f"Failed to extract company data from the profile image: {exc}")
 
         text = response.text.strip()
         # Strip markdown code fences if the model adds them despite the instruction.

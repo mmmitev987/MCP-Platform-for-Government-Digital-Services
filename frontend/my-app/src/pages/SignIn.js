@@ -1,13 +1,14 @@
 import { useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
-
+import { useTranslation } from "react-i18next";
 import { login, register } from "../api/auth";
 import { useAuth } from "../contexts/AuthContext";
 
 export default function SignIn() {
+  const { t } = useTranslation();
   const { login: authLogin } = useAuth();
   const navigate = useNavigate();
-  const [mode, setMode] = useState("login"); // "login" | "register"
+  const [mode, setMode] = useState("login");
   const [form, setForm] = useState({ email: "", password: "", full_name: "" });
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -33,7 +34,7 @@ export default function SignIn() {
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
           <h1 className="text-3xl font-bold text-white">Gov<span className="text-indigo-400">MCP</span></h1>
-          <p className="text-gray-400 mt-2 text-sm">Macedonian Digital Government Services</p>
+          <p className="text-gray-400 mt-2 text-sm">{t("auth.subtitle")}</p>
         </div>
 
         <div className="bg-gray-900 rounded-2xl border border-gray-800 p-8">
@@ -46,7 +47,7 @@ export default function SignIn() {
                   mode === m ? "bg-indigo-600 text-white" : "text-gray-400 hover:text-white"
                 }`}
               >
-                {m === "login" ? "Sign In" : "Register"}
+                {m === "login" ? t("auth.signIn") : t("auth.register")}
               </button>
             ))}
           </div>
@@ -54,7 +55,7 @@ export default function SignIn() {
           <form onSubmit={handleSubmit} className="space-y-4">
             {mode === "register" && (
               <div>
-                <label className="block text-sm text-gray-400 mb-1">Full Name</label>
+                <label className="block text-sm text-gray-400 mb-1">{t("auth.fullName")}</label>
                 <input
                   type="text"
                   value={form.full_name}
@@ -65,7 +66,7 @@ export default function SignIn() {
               </div>
             )}
             <div>
-              <label className="block text-sm text-gray-400 mb-1">Email</label>
+              <label className="block text-sm text-gray-400 mb-1">{t("auth.email")}</label>
               <input
                 type="email"
                 required
@@ -76,7 +77,7 @@ export default function SignIn() {
               />
             </div>
             <div>
-              <label className="block text-sm text-gray-400 mb-1">Password</label>
+              <label className="block text-sm text-gray-400 mb-1">{t("auth.password")}</label>
               <input
                 type="password"
                 required
@@ -98,7 +99,7 @@ export default function SignIn() {
               disabled={loading}
               className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-medium py-3 rounded-lg transition-colors"
             >
-              {loading ? "Please wait…" : mode === "login" ? "Sign In" : "Create Account"}
+              {loading ? t("auth.pleaseWait") : mode === "login" ? t("auth.signIn") : t("auth.createAccount")}
             </button>
 
             {mode === "login" && (
@@ -106,7 +107,7 @@ export default function SignIn() {
                 to="/forgot-password"
                 className="block text-center text-gray-500 hover:text-gray-300 text-sm transition-colors"
               >
-                Forgot your password?
+                {t("auth.forgotPassword")}
               </Link>
             )}
           </form>

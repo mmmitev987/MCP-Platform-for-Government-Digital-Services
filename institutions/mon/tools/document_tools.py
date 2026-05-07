@@ -8,6 +8,8 @@ where to apply.
 All functions are public — no authentication required.
 """
 
+from institutions.shared.errors import tool_error
+
 _DOCUMENT_CATALOG: dict[str, dict] = {
     "потврда_за_запис": {
         "name": "Потврда за запис (Certificate of Enrollment)",
@@ -127,11 +129,12 @@ def get_mon_document_requirements(document_type: str) -> dict:
 
     if info is None:
         available = list(_DOCUMENT_CATALOG.keys())
-        return {
-            "error": f"Unknown document type '{document_type}'. "
-                     f"Available types: {available}. "
-                     f"Call list_mon_document_types() to see all options."
-        }
+        return tool_error(
+            "not_found",
+            f"Unknown document type '{document_type}'. "
+            f"Available types: {available}. "
+            "Call list_mon_document_types() to see all options."
+        )
 
     return {
         "document_type":      document_type,

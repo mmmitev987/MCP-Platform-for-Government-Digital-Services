@@ -2,6 +2,7 @@ import secrets
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import Session
 from backend.database import get_db
@@ -13,6 +14,22 @@ from backend.services.email_service import send_password_reset_email
 from backend.dependencies import get_current_user
 
 router = APIRouter()
+
+
+@router.get("/csrf-token")
+def get_csrf_token():
+    """Issue a CSRF token via cookie + JSON body (Double Submit Cookie pattern)."""
+    token = secrets.token_urlsafe(32)
+    response = JSONResponse(content={"csrf_token": token})
+    response.set_cookie(
+        key="csrf_token",
+        value=token,
+        httponly=False,   # Must be readable by JS so axios can put it in the header
+        samesite="strict",
+        secure=False,     # Set to True in production (HTTPS only)
+        max_age=3600,
+    )
+    return response
 
 
 @router.post("/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)

@@ -18,6 +18,8 @@ Available tools:
 import requests
 from datetime import datetime
 
+from institutions.shared.errors import tool_error
+
 
 # ── Private helpers ───────────────────────────────────────────────────────────
 
@@ -27,13 +29,18 @@ def _get_json(path: str):
 
     Args:
         path: URL path starting with "/", e.g. "/api/pp/side_navigation".
+
+    Raises:
+        requests.RequestException on network errors.
+        ValueError on JSON parse errors.
     """
     url = "https://mojtermin.mk" + path
     headers = {
         "Accept": "application/json",
         "User-Agent": "Mozilla/5.0",
     }
-    response = requests.get(url, headers=headers)
+    response = requests.get(url, headers=headers, timeout=15)
+    response.raise_for_status()
     return response.json()
 
 
@@ -61,8 +68,19 @@ def get_locations() -> dict:
     Returns a dict keyed by location ID, each value containing location metadata
     (name, address, etc.) as returned by the API.
     """
-    url = "https://mojtermin.mk/api/pp/locations"
-    return requests.get(url).json()
+    try:
+        url = "https://mojtermin.mk/api/pp/locations"
+        response = requests.get(url, timeout=15)
+        response.raise_for_status()
+        return response.json()
+    except requests.Timeout:
+        return tool_error("network_error", "mojtermin.mk did not respond in time. Please try again.")
+    except requests.ConnectionError:
+        return tool_error("network_error", "Could not connect to mojtermin.mk. Check your internet connection.")
+    except requests.HTTPError as exc:
+        return tool_error("network_error", f"mojtermin.mk returned an error: {exc}")
+    except Exception as exc:
+        return tool_error("unexpected_error", f"An unexpected error occurred while fetching locations: {exc}")
 
 
 def get_location_by_name(name: str) -> dict | None:
@@ -73,9 +91,16 @@ def get_location_by_name(name: str) -> dict | None:
         name: Partial or full location name to search for, e.g. "СТРУГА".
 
     Returns:
-        The location dict if found, or None if no match.
+        The location dict if found, None if no match, or an error dict on failure.
     """
-    data = get_locations()
+    try:
+        data = get_locations()
+    except Exception as exc:
+        return tool_error("unexpected_error", f"Could not fetch locations: {exc}")
+
+    # Propagate error dict from get_locations
+    if isinstance(data, dict) and data.get("error"):
+        return data
 
     for loc in data.values():
         if name.lower() in loc["name"].lower():
@@ -84,14 +109,23 @@ def get_location_by_name(name: str) -> dict | None:
     return None
 
 
-def get_specialties() -> list[str]:
+def get_specialties() -> list[str] | dict:
     """
     Return a list of all medical specialties available on mojtermin.mk.
 
     Traverses the portal's side-navigation tree and collects every node
     whose type is "specialty".
     """
-    data = _get_json("/api/pp/side_navigation")
+    try:
+        data = _get_json("/api/pp/side_navigation")
+    except requests.Timeout:
+        return tool_error("network_error", "mojtermin.mk did not respond in time. Please try again.")
+    except requests.ConnectionError:
+        return tool_error("network_error", "Could not connect to mojtermin.mk. Check your internet connection.")
+    except requests.HTTPError as exc:
+        return tool_error("network_error", f"mojtermin.mk returned an error: {exc}")
+    except Exception as exc:
+        return tool_error("unexpected_error", f"An unexpected error occurred while fetching specialties: {exc}")
 
     specialties = []
 
@@ -106,14 +140,23 @@ def get_specialties() -> list[str]:
     return specialties
 
 
-def get_doctors() -> list[str]:
+def get_doctors() -> list[str] | dict:
     """
     Return a sorted, deduplicated list of all doctor names across the entire portal.
 
     Identifies doctors using the is_doctor() heuristic: resource nodes whose
     names are 2–3 fully uppercase words.
     """
-    data = _get_json("/api/pp/side_navigation")
+    try:
+        data = _get_json("/api/pp/side_navigation")
+    except requests.Timeout:
+        return tool_error("network_error", "mojtermin.mk did not respond in time. Please try again.")
+    except requests.ConnectionError:
+        return tool_error("network_error", "Could not connect to mojtermin.mk. Check your internet connection.")
+    except requests.HTTPError as exc:
+        return tool_error("network_error", f"mojtermin.mk returned an error: {exc}")
+    except Exception as exc:
+        return tool_error("unexpected_error", f"An unexpected error occurred while fetching doctors: {exc}")
 
     doctors = []
 
@@ -130,7 +173,7 @@ def get_doctors() -> list[str]:
     return sorted(set(doctors))
 
 
-def get_doctors_by_city(city_name: str) -> list[dict]:
+def get_doctors_by_city(city_name: str) -> list[dict] | dict:
     """
     Return all doctors in a given city, along with their clinic name.
 
@@ -141,7 +184,16 @@ def get_doctors_by_city(city_name: str) -> list[dict]:
         List of dicts, each with keys: "doctor", "clinic", "city".
         Sorted alphabetically by doctor name.
     """
-    data = _get_json("/api/pp/side_navigation")
+    try:
+        data = _get_json("/api/pp/side_navigation")
+    except requests.Timeout:
+        return tool_error("network_error", "mojtermin.mk did not respond in time. Please try again.")
+    except requests.ConnectionError:
+        return tool_error("network_error", "Could not connect to mojtermin.mk. Check your internet connection.")
+    except requests.HTTPError as exc:
+        return tool_error("network_error", f"mojtermin.mk returned an error: {exc}")
+    except Exception as exc:
+        return tool_error("unexpected_error", f"An unexpected error occurred while fetching doctors by city: {exc}")
 
     results = []
 
@@ -178,9 +230,18 @@ def get_available_appointments_by_name(city: str, doctor_name: str, date: str) -
 
     Returns:
         Dict with keys "doctor", "date", "available_slots" (list of "HH:MM" strings),
-        or the string "Doctor not found" if no match.
+        or an error dict on failure.
     """
-    data = _get_json("/api/pp/side_navigation")
+    try:
+        data = _get_json("/api/pp/side_navigation")
+    except requests.Timeout:
+        return tool_error("network_error", "mojtermin.mk did not respond in time. Please try again.")
+    except requests.ConnectionError:
+        return tool_error("network_error", "Could not connect to mojtermin.mk. Check your internet connection.")
+    except requests.HTTPError as exc:
+        return tool_error("network_error", f"mojtermin.mk returned an error: {exc}")
+    except Exception as exc:
+        return tool_error("unexpected_error", f"An unexpected error occurred while searching for the doctor: {exc}")
 
     doctor_id = None
     found_doctor = None
@@ -203,16 +264,31 @@ def get_available_appointments_by_name(city: str, doctor_name: str, date: str) -
     traverse(data)
 
     if not doctor_id:
-        return "Doctor not found"
+        return tool_error(
+            "not_found",
+            f"No doctor matching '{doctor_name}' was found in '{city}'. "
+            "Try calling get_doctors_by_city() to see available doctors."
+        )
 
     # Fetch the slot availability calendar for this doctor.
-    url = f"https://mojtermin.mk/api/pp/resources/{doctor_id}/slots_availability"
-    headers = {"Accept": "application/json", "User-Agent": "Mozilla/5.0"}
-    slots_data = requests.get(url, headers=headers).json()
+    try:
+        url = f"https://mojtermin.mk/api/pp/resources/{doctor_id}/slots_availability"
+        headers = {"Accept": "application/json", "User-Agent": "Mozilla/5.0"}
+        slots_response = requests.get(url, headers=headers, timeout=15)
+        slots_response.raise_for_status()
+        slots_data = slots_response.json()
+    except requests.Timeout:
+        return tool_error("network_error", "mojtermin.mk did not respond in time while fetching appointment slots.")
+    except requests.ConnectionError:
+        return tool_error("network_error", "Could not connect to mojtermin.mk while fetching appointment slots.")
+    except requests.HTTPError as exc:
+        return tool_error("network_error", f"mojtermin.mk returned an error while fetching slots: {exc}")
+    except Exception as exc:
+        return tool_error("unexpected_error", f"An unexpected error occurred while fetching appointment slots: {exc}")
 
     available = []
 
-    for key in slots_data["timeslots"]:
+    for key in slots_data.get("timeslots", {}):
         for slot in slots_data["timeslots"][key]:
             slot_date = slot["term"].split("T")[0]
 

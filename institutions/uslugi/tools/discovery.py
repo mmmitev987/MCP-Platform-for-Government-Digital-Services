@@ -2,6 +2,8 @@ import re
 import requests
 from pathlib import Path
 
+from institutions.shared.errors import tool_error
+
 BASE_URL = "https://uslugi.gov.mk/Services"
 HEADERS = {"Content-Type": "application/json;charset=UTF-8", "from-angular": "true"}
 
@@ -11,9 +13,14 @@ def _clean_html(raw_html: str) -> str:
     if not raw_html: return ""
     return re.sub(r"<[^>]+>", "", raw_html).strip()
 
-def list_all_services() -> str:
+def list_all_services() -> str | dict:
     """Return the full list of all services as a plain text string."""
-    return SERVICES_LIST_PATH.read_text(encoding="utf-8")
+    try:
+        return SERVICES_LIST_PATH.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return tool_error("not_found", "The local services list file is missing. Please re-run the setup.")
+    except Exception as exc:
+        return tool_error("unexpected_error", f"Could not read the services list: {exc}")
 
 def search_portal(query: str) -> list[dict]:
     """Search for services or groups by keyword. Query must be in Macedonian Cyrillic.
@@ -30,9 +37,18 @@ def search_portal(query: str) -> list[dict]:
             "ServiceApplicationType": {"Key": 0, "Value": ""}
         }
     }
-    r = requests.post(f"{BASE_URL}/GetServices", json=payload, headers=HEADERS)
-    r.raise_for_status()
-    items = r.json().get("Items", [])
+    try:
+        r = requests.post(f"{BASE_URL}/GetServices", json=payload, headers=HEADERS, timeout=15)
+        r.raise_for_status()
+        items = r.json().get("Items", [])
+    except requests.Timeout:
+        return [tool_error("network_error", "uslugi.gov.mk did not respond in time. Please try again.")]
+    except requests.ConnectionError:
+        return [tool_error("network_error", "Could not connect to uslugi.gov.mk. Check your internet connection.")]
+    except requests.HTTPError as exc:
+        return [tool_error("network_error", f"uslugi.gov.mk returned an error: {exc}")]
+    except Exception as exc:
+        return [tool_error("unexpected_error", f"An unexpected error occurred while searching: {exc}")]
 
     return [{
         "id": i.get("Id"),
@@ -44,9 +60,18 @@ def search_portal(query: str) -> list[dict]:
 def get_group_contents(group_id: int) -> list[dict]:
     """If a search result is a group (is_group: true), use this to see its services."""
     payload = {"groupApsServiceId": str(group_id)}
-    r = requests.post(f"{BASE_URL}/GetGroupServiceDetails", json=payload, headers=HEADERS)
-    r.raise_for_status()
-    services = r.json().get("AdministrativeProcedureServices", [])
+    try:
+        r = requests.post(f"{BASE_URL}/GetGroupServiceDetails", json=payload, headers=HEADERS, timeout=15)
+        r.raise_for_status()
+        services = r.json().get("AdministrativeProcedureServices", [])
+    except requests.Timeout:
+        return [tool_error("network_error", "uslugi.gov.mk did not respond in time. Please try again.")]
+    except requests.ConnectionError:
+        return [tool_error("network_error", "Could not connect to uslugi.gov.mk. Check your internet connection.")]
+    except requests.HTTPError as exc:
+        return [tool_error("network_error", f"uslugi.gov.mk returned an error: {exc}")]
+    except Exception as exc:
+        return [tool_error("unexpected_error", f"An unexpected error occurred while fetching group contents: {exc}")]
 
     return [{
         "id": s.get("Id"),
@@ -54,12 +79,25 @@ def get_group_contents(group_id: int) -> list[dict]:
         "is_electronic": s.get("IsElectronicService"),
         "intro": _clean_html(s.get("AdministrativeProcedureServiceIntro"))
     } for s in services]
+
 def get_service_details(service_id: int) -> dict:
     """Fetch full details for a specific service ID — requirements, conditions, prices, deadlines, etc."""
     payload = {"id": str(service_id), "serviceUniqueId": None}
-    r = requests.post(f"{BASE_URL}/GetServiceDetails", json=payload, headers=HEADERS)
-    r.raise_for_status()
-    d = r.json()
+    try:
+        r = requests.post(f"{BASE_URL}/GetServiceDetails", json=payload, headers=HEADERS, timeout=15)
+        r.raise_for_status()
+        d = r.json()
+    except requests.Timeout:
+        return tool_error("network_error", "uslugi.gov.mk did not respond in time. Please try again.")
+    except requests.ConnectionError:
+        return tool_error("network_error", "Could not connect to uslugi.gov.mk. Check your internet connection.")
+    except requests.HTTPError as exc:
+        status = exc.response.status_code if exc.response is not None else "unknown"
+        if status == 404:
+            return tool_error("not_found", f"Service ID {service_id} was not found on uslugi.gov.mk.")
+        return tool_error("network_error", f"uslugi.gov.mk returned an error (HTTP {status}).")
+    except Exception as exc:
+        return tool_error("unexpected_error", f"An unexpected error occurred while fetching service details: {exc}")
 
     # Apply URL
     unique_name = d.get("ApsUniqueName")

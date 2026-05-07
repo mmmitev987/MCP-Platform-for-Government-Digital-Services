@@ -10,7 +10,7 @@ class User(Base):
     email = Column(String, unique=True, index=True, nullable=False)
     hashed_password = Column(String, nullable=False)
     full_name = Column(String, nullable=True)
-    language = Column(String, default="en")       # "en" | "mk"
+    language = Column(String, default="en")       # BCP-47 code; see frontend/src/locales/index.js
     notifications = Column(Boolean, default=True)
     disabled_institutions = Column(String, default="")   # comma-separated slugs
     created_at = Column(DateTime(timezone=True), server_default=func.now())

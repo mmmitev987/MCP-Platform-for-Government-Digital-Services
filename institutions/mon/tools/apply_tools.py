@@ -10,6 +10,7 @@ Tools for browsing MON services and finding out what you need to apply.
 import json
 import requests
 
+from institutions.shared.errors import tool_error
 from institutions.mon.auth.session import session_manager
 from institutions.mon.config import PORTAL_BASE_URL
 
@@ -53,6 +54,7 @@ def list_mon_services(page: int = 0, size: int = 20) -> dict:
             },
             "count": int,
         }
+        or on error: { "error": True, "code": str, "message": str }
     """
     try:
         resp = requests.get(
@@ -63,8 +65,14 @@ def list_mon_services(page: int = 0, size: int = 20) -> dict:
         )
         resp.raise_for_status()
         items = resp.json()
-    except requests.RequestException as exc:
-        return {"error": f"Portal unavailable: {exc}"}
+    except requests.Timeout:
+        return tool_error("network_error", "e-uslugi.mon.gov.mk did not respond in time. Please try again.")
+    except requests.ConnectionError:
+        return tool_error("network_error", "Could not connect to e-uslugi.mon.gov.mk. Check your internet connection.")
+    except requests.HTTPError as exc:
+        return tool_error("network_error", f"e-uslugi.mon.gov.mk returned an error: {exc}")
+    except Exception as exc:
+        return tool_error("unexpected_error", f"An unexpected error occurred while listing MON services: {exc}")
 
     raw = items if isinstance(items, list) else items.get("content", [])
     services = [
@@ -107,10 +115,14 @@ def get_mon_service_requirements(service_id: int) -> dict:
             "documents_required": list[str],
             "apply_url":          str,
         }
+        or on error: { "error": True, "code": str, "message": str }
     """
     headers = _auth_headers()
     if not headers:
-        return {"error": "Not logged in. Please call login_mon() first."}
+        return tool_error(
+            "auth_required",
+            "You are not logged in to e-uslugi.mon.gov.mk. Please call login_mon() first."
+        )
 
     try:
         resp = requests.get(
@@ -120,10 +132,21 @@ def get_mon_service_requirements(service_id: int) -> dict:
         )
         resp.raise_for_status()
         data = json.loads(resp.text)
-    except requests.RequestException as exc:
-        return {"error": f"Portal unavailable: {exc}"}
+    except requests.Timeout:
+        return tool_error("network_error", "e-uslugi.mon.gov.mk did not respond in time. Please try again.")
+    except requests.ConnectionError:
+        return tool_error("network_error", "Could not connect to e-uslugi.mon.gov.mk. Check your internet connection.")
+    except requests.HTTPError as exc:
+        status = exc.response.status_code if exc.response is not None else "unknown"
+        if status == 401 or status == 403:
+            return tool_error("auth_required", "Your MON session has expired. Please call login_mon() to log in again.")
+        if status == 404:
+            return tool_error("not_found", f"MON service with ID {service_id} was not found.")
+        return tool_error("network_error", f"e-uslugi.mon.gov.mk returned an error (HTTP {status}).")
     except json.JSONDecodeError as exc:
-        return {"error": f"Unexpected response format: {exc}"}
+        return tool_error("parse_error", f"e-uslugi.mon.gov.mk returned an unexpected response format: {exc}")
+    except Exception as exc:
+        return tool_error("unexpected_error", f"An unexpected error occurred while fetching MON service requirements: {exc}")
 
     # Extract document upload fields from the form definition
     documents_required = []

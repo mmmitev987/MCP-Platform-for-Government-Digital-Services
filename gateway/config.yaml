@@ -12,29 +12,48 @@
 #   5. Tool descriptions are prefixed with "[<name>]" so the LLM can see
 #      which institution each tool belongs to.
 #
-# Adding a new institution:
+# Adding a new institution — ONLY this file needs to change:
 #   1. Create its directory under institutions/<new_slug>/
-#   2. Add an entry here — that is ALL that needs to change in this file.
-#      No changes to the gateway code or the agent are required.
+#   2. Add an entry below with all five fields.
+#      No changes to gateway code, agent code, or any other file are required.
 #
 # Fields:
-#   slug    — Short identifier used as the tool namespace prefix.
-#             Must contain only alphanumerics and underscores.
-#             E.g.  uslugi  →  tools are named  uslugi__login, uslugi__logout …
-#   name    — Human-readable portal name shown in LLM tool descriptions.
-#   command — Executable to use (use the Python interpreter).
-#             "python" is resolved at runtime to sys.executable so the venv
-#             Python is always used — never a system Python.
-#   args    — Command-line arguments; "-m <module>" runs as a module (preferred
-#             over a file path so Python resolves imports from the project root).
+#   slug         — Short identifier used as the tool namespace prefix.
+#                  Must contain only alphanumerics and underscores.
+#                  E.g.  uslugi  →  tools are named  uslugi__login …
+#   name         — Human-readable portal name shown in LLM tool descriptions
+#                  and in error messages.
+#   command      — Executable to use. "python" is resolved at runtime to
+#                  sys.executable so the venv Python is always used.
+#   args         — Command-line arguments. "-m <module>" runs as a module
+#                  (preferred over a file path — imports resolve correctly).
+#   description  — One-sentence summary of what services this institution
+#                  covers. Injected into the LLM system prompt automatically.
+#   tool_rules   — Ordered list of tool-usage rules for this institution.
+#                  Injected verbatim into the LLM system prompt so the agent
+#                  knows the correct call order and what to avoid.
+#                  Write rules as imperative sentences (one per list item).
 
 institutions:
+
   - slug: uslugi
     name: "uslugi.gov.mk"
     command: python
     args:
       - "-m"
       - "institutions.uslugi.main"
+    description: >
+      Administrative procedures: passport, ID card, driving licence, vehicle
+      registration, citizenship, construction permits, weapons permits, and
+      1 000+ other government services.
+    tool_rules:
+      - "Call search_services first (query MUST be in Macedonian Cyrillic)."
+      - "If the result has is_group: true, call get_group_contents next."
+      - "Call get_service_requirements only when the user needs price, deadline, or required documents."
+      - "Fallback: call list_all_services ONLY if search_services returned 0 relevant results."
+      - "Never call search_services AND list_all_services for the same query."
+      - "Never call get_service_requirements just to confirm a service exists."
+      - "Translate queries: 'passport'→'пасош', 'ID card'→'лична карта', 'driver licence'→'возачка дозвола', 'vehicle registration'→'регистрација на возило'."
 
   - slug: mojtermin
     name: "mojtermin.mk"
@@ -42,6 +61,16 @@ institutions:
     args:
       - "-m"
       - "institutions.mojtermin.main"
+    description: >
+      Medical appointment booking: find clinics and doctors by city or
+      specialty, and check available appointment slots. No login required.
+    tool_rules:
+      - "If the user mentions a city, call get_doctors_by_city (preferred over get_doctors)."
+      - "If no city is mentioned, call get_doctors to list all doctors."
+      - "Never call get_doctors AND get_doctors_by_city for the same request."
+      - "Call get_available_appointments_by_name only when the user explicitly wants to book or check slots."
+      - "Call get_locations only if the user asks about clinic locations specifically."
+      - "Call get_specialties only if the user asks what medical specialties are available."
 
   - slug: crm
     name: "crm.com.mk"
@@ -49,3 +78,34 @@ institutions:
     args:
       - "-m"
       - "institutions.crm.main"
+    description: >
+      Central Registry of North Macedonia: search registered companies,
+      retrieve their full registration profile, founders, directors, and
+      annual financial reports.
+    tool_rules:
+      - "Always call search_companies first to obtain the leid (company ID)."
+      - "Then call exactly one detail tool based on what the user asked for:"
+      - "  - get_company_details for general company info (address, status, legal form)."
+      - "  - get_founders_and_directors if the user asks about people / ownership."
+      - "  - get_annual_reports if the user asks about finances or annual filings."
+      - "Never call more than one detail tool unless the user explicitly asked for both."
+      - "Never call any detail tool without first getting the leid from search_companies."
+
+  - slug: mon
+    name: "e-uslugi.mon.gov.mk"
+    command: python
+    args:
+      - "-m"
+      - "institutions.mon.main"
+    description: >
+      Ministry of Education and Science: browse active services and contests,
+      find out what documents are needed to apply, and look up requirements
+      for official education documents (enrollment certificates, diplomas,
+      diploma recognition, transcripts).
+    tool_rules:
+      - "Call check_session_mon first to see if the user is already logged in."
+      - "Call login_mon only if check_session_mon says the session is inactive."
+      - "Call list_mon_services to find the service the user is asking about."
+      - "Call get_mon_service_requirements only when the user needs to know what documents to upload."
+      - "For document questions (certificates, transcripts, diplomas), use list_mon_document_types and get_mon_document_requirements — these do NOT require login."
+      - "Never call list_mon_services and get_mon_service_requirements in the same turn unless you already have the specific service ID."

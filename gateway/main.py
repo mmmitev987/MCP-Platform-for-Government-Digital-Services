@@ -1,7 +1,7 @@
 """
 gateway/main.py
 ────────────────────────────────────────────────────────────────────────────────
-MCP Aggregator Gateway — the single entry point for the Gemini agent.
+MCP Aggregator Gateway — the single entry point for the AI agent.
 
 What this does
 ──────────────
@@ -9,7 +9,7 @@ The gateway is itself an MCP server.  Instead of implementing its own tools,
 it aggregates tools from multiple institution-specific MCP servers:
 
   ┌─────────────────────────────────────────────────────────────────┐
-  │                   agent/gemini_agent.py                         │
+  │                   backend/services/chat_service.py              │
   └──────────────────────────────┬──────────────────────────────────┘
                                  │ MCP stdio  (one connection)
                                  ▼
@@ -21,28 +21,42 @@ it aggregates tools from multiple institution-specific MCP servers:
   │   • Collects & namespaces their tools:                          │
   │       uslugi__login, mojtermin__get_doctors_by_city …           │
   │   • Routes incoming tool calls to the correct subprocess.       │
+  │   • FAULT ISOLATION: one adapter crashing never affects others. │
   └──────────────────┬──────────────────────────┬───────────────────┘
       MCP stdio       │                          │  MCP stdio
                       ▼                          ▼
       institutions/uslugi/main.py   institutions/mojtermin/main.py
 
-Why the low-level MCP Server API?
-──────────────────────────────────
-FastMCP registers tools with Python decorators at import time, so it is not
-suitable for DYNAMIC tool registration (we don't know what tools exist until
-we connect to the institution servers at runtime).  The low-level
-`mcp.server.lowlevel.Server` API lets us register list_tools and call_tool
-handlers that compute their responses dynamically — perfect for a proxy.
+Fault isolation model
+─────────────────────
+Each institution runs in its own subprocess and is managed by an independent
+InstitutionConnection object with its own AsyncExitStack.  Failures are
+isolated at three levels:
+
+  1. STARTUP: If an institution fails to connect on startup (e.g. import error,
+     port conflict, Playwright crash), the gateway logs the error and continues
+     connecting the remaining institutions.  The failed institution's tools are
+     omitted from the tool list so the LLM never tries to call them.
+
+  2. RUNTIME — dead session: If a tool call fails because the subprocess has
+     crashed (pipe closed, OS error, MCP protocol error), the connection is
+     marked dead and a structured error dict is returned to the LLM.  The
+     other institutions are completely unaffected.
+
+  3. RUNTIME — auto-reconnect: Before returning a failure to the LLM, the
+     gateway makes one transparent reconnection attempt.  If the subprocess
+     can be restarted (e.g., transient crash), the original tool call is
+     retried and the LLM never sees an error.  If reconnection also fails,
+     the LLM receives a structured { "error": true, "code": "adapter_down", … }
+     response and can inform the user gracefully.
 
 Startup sequence
 ────────────────
   1. Read gateway/config.yaml.
-  2. For each institution: spawn subprocess, connect via MCP, call list_tools().
+  2. For each institution: try to spawn subprocess + connect via MCP.
+     On failure: log, continue with the rest.
   3. Build the aggregated tool list (with namespaced names).
   4. Open the gateway's own stdio transport and start serving the agent.
-
-All institution subprocess connections are kept alive inside an AsyncExitStack
-for the entire lifetime of the gateway process.
 
 Running
 ───────
@@ -51,20 +65,19 @@ Running
 """
 
 import asyncio
+import json
 import sys
 from contextlib import AsyncExitStack
 from pathlib import Path
 
-import yaml  # PyYAML — add to requirements.txt
+import yaml
 
 # ── Low-level MCP server API ──────────────────────────────────────────────────
-# We use the low-level Server instead of FastMCP because we need to register
-# tool handlers dynamically (we don't know tool names at import time).
 from mcp.server.lowlevel import Server
 from mcp.server.stdio import stdio_server
 import mcp.types as types
 
-# ── MCP client API — used to connect to institution subprocesses ──────────────
+# ── MCP client API ────────────────────────────────────────────────────────────
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
@@ -72,10 +85,202 @@ from mcp.client.stdio import stdio_client
 PROJECT_ROOT = Path(__file__).parent.parent.resolve()
 
 # ── Institution registry ──────────────────────────────────────────────────────
-# Loaded once at module import so the config is available before async starts.
 _config_path = Path(__file__).parent / "config.yaml"
 with open(_config_path) as _f:
     _gateway_config: dict = yaml.safe_load(_f)
+
+# Timeout for a single institution connection attempt (seconds)
+_CONNECT_TIMEOUT_S = 60
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# InstitutionConnection — one per institution, fully isolated
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class InstitutionConnection:
+    """
+    Manages the lifecycle of one institution's MCP subprocess.
+
+    Each instance owns its own AsyncExitStack so it can be started and stopped
+    independently of all other institutions.  This is the key to fault isolation:
+    a crash in one InstitutionConnection cannot propagate to another.
+
+    States
+    ──────
+      alive=True   — subprocess running, session ready, tools available
+      alive=False  — failed to connect on startup OR subprocess has since died
+
+    Thread/coroutine safety
+    ───────────────────────
+      _reconnect_lock prevents two concurrent callers from each trying to
+      restart the same subprocess at the same time.
+    """
+
+    def __init__(self, slug: str, display_name: str, server_params: StdioServerParameters):
+        self.slug = slug
+        self.display_name = display_name
+        self.server_params = server_params
+
+        self.session: ClientSession | None = None
+        self.tools: list[types.Tool] = []          # original (un-namespaced) tools
+        self.alive: bool = False
+
+        self._exit_stack: AsyncExitStack | None = None
+        self._reconnect_lock = asyncio.Lock()
+
+    # ── Lifecycle ─────────────────────────────────────────────────────────────
+
+    async def connect(self) -> bool:
+        """
+        Spawn the institution subprocess and establish an MCP session.
+
+        Safe to call multiple times — tears down the previous connection first.
+
+        Returns:
+            True if connection succeeded and tools were fetched.
+            False if any step failed (subprocess won't start, MCP error, etc.).
+        """
+        # Clean up any previous connection before attempting a new one.
+        await self._teardown()
+
+        try:
+            self._exit_stack = AsyncExitStack()
+            await self._exit_stack.__aenter__()
+
+            read, write = await self._exit_stack.enter_async_context(
+                stdio_client(self.server_params)
+            )
+            self.session = await self._exit_stack.enter_async_context(
+                ClientSession(read, write)
+            )
+
+            await asyncio.wait_for(
+                self.session.initialize(),
+                timeout=_CONNECT_TIMEOUT_S,
+            )
+
+            tools_response = await asyncio.wait_for(
+                self.session.list_tools(),
+                timeout=_CONNECT_TIMEOUT_S,
+            )
+            self.tools = tools_response.tools
+            self.alive = True
+
+            print(
+                f"[Gateway] ✓ {self.display_name}: "
+                f"{len(self.tools)} tools registered "
+                f"({', '.join(t.name for t in self.tools)})",
+                file=sys.stderr,
+            )
+            return True
+
+        except Exception as exc:
+            print(
+                f"[Gateway] ✗ {self.display_name} ({self.slug}): "
+                f"connection failed — {type(exc).__name__}: {exc}",
+                file=sys.stderr,
+            )
+            await self._teardown()
+            return False
+
+    async def _teardown(self) -> None:
+        """Close the MCP session and terminate the subprocess (if running)."""
+        if self._exit_stack is not None:
+            try:
+                await self._exit_stack.__aexit__(None, None, None)
+            except Exception as exc:
+                print(
+                    f"[Gateway] Warning: error tearing down {self.slug}: {exc}",
+                    file=sys.stderr,
+                )
+            finally:
+                self._exit_stack = None
+                self.session = None
+                self.alive = False
+
+    async def disconnect(self) -> None:
+        """Gracefully shut down this institution's subprocess."""
+        await self._teardown()
+
+    # ── Tool call with auto-reconnect ─────────────────────────────────────────
+
+    async def call_tool(
+        self,
+        name: str,
+        arguments: dict,
+    ) -> list[types.TextContent | types.ImageContent | types.EmbeddedResource]:
+        """
+        Call a tool on this institution's MCP server.
+
+        If the call fails because the session is dead (subprocess crashed),
+        one transparent reconnection attempt is made.  If that also fails,
+        a structured error dict is returned as a TextContent so the LLM agent
+        can inform the user gracefully.
+
+        Args:
+            name:      Original (un-namespaced) tool name as the institution
+                       registered it, e.g. "login" not "uslugi__login".
+            arguments: Tool arguments from the LLM.
+
+        Returns:
+            List of MCP content items on success.
+            List with a single TextContent containing a JSON error dict on failure.
+        """
+        # ── First attempt ─────────────────────────────────────────────────────
+        if self.alive and self.session is not None:
+            try:
+                result = await self.session.call_tool(name, arguments=arguments)
+                return result.content
+            except Exception as exc:
+                print(
+                    f"[Gateway] {self.slug}:{name} call failed "
+                    f"({type(exc).__name__}: {exc}) — attempting reconnect",
+                    file=sys.stderr,
+                )
+                self.alive = False  # Mark dead before reconnect attempt
+
+        # ── Reconnect attempt (one per adapter, serialised by lock) ───────────
+        async with self._reconnect_lock:
+            # Another coroutine may have already reconnected while we waited.
+            if self.alive and self.session is not None:
+                try:
+                    result = await self.session.call_tool(name, arguments=arguments)
+                    return result.content
+                except Exception:
+                    self.alive = False
+
+            print(
+                f"[Gateway] Reconnecting to {self.display_name} ({self.slug}) …",
+                file=sys.stderr,
+            )
+            reconnected = await self.connect()
+
+        # ── Retry after reconnect ─────────────────────────────────────────────
+        if reconnected and self.session is not None:
+            try:
+                result = await self.session.call_tool(name, arguments=arguments)
+                print(
+                    f"[Gateway] ✓ {self.slug} reconnected successfully.",
+                    file=sys.stderr,
+                )
+                return result.content
+            except Exception as exc:
+                self.alive = False
+                print(
+                    f"[Gateway] {self.slug}:{name} failed even after reconnect: {exc}",
+                    file=sys.stderr,
+                )
+
+        # ── All attempts exhausted — return structured error ──────────────────
+        error_payload = json.dumps({
+            "error": True,
+            "code": "adapter_down",
+            "message": (
+                f"The {self.display_name} service is currently unavailable. "
+                "It may be restarting — please try again in a moment."
+            ),
+        })
+        return [types.TextContent(type="text", text=error_payload)]
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -91,37 +296,24 @@ class GatewayServer:
 
     Attributes:
         _server:        The low-level MCP Server that serves the agent.
-        _sessions:      slug → ClientSession mapping for routing.
-        _tool_routing:  namespaced_tool_name → institution slug mapping.
+        _connections:   slug → InstitutionConnection (one per institution).
+        _tool_routing:  namespaced_tool_name → slug (for routing incoming calls).
         _tools:         Complete list of namespaced Tool objects for list_tools.
     """
 
     def __init__(self):
-        # Create the low-level MCP Server.
-        # "mcp-gateway" is the server name sent during the MCP handshake.
         self._server = Server("mcp-gateway")
+        self._connections: dict[str, InstitutionConnection] = {}
+        self._tool_routing: dict[str, str] = {}
+        self._tools: list[types.Tool] = []
 
-        # Populated during connect_institutions():
-        self._sessions: dict[str, ClientSession] = {}       # slug → session
-        self._tool_routing: dict[str, str] = {}             # namespaced name → slug
-        self._tools: list[types.Tool] = []                  # all namespaced tools
-
-        # Register the two MCP request handlers on the server.
-        # Using decorators here keeps the handler registration close to where
-        # the server object is created — easy to find.
         self._server.list_tools()(self._handle_list_tools)
         self._server.call_tool()(self._handle_call_tool)
 
     # ── MCP request handlers ──────────────────────────────────────────────────
 
     async def _handle_list_tools(self) -> list[types.Tool]:
-        """
-        Respond to the agent's tools/list request.
-
-        Returns the aggregated list of all namespaced tools from every
-        institution server.  Called once during the agent's initialisation
-        and potentially again if the agent refreshes its tool list.
-        """
+        """Return the aggregated list of all namespaced tools from every live institution."""
         return self._tools
 
     async def _handle_call_tool(
@@ -132,67 +324,52 @@ class GatewayServer:
         """
         Route an incoming tool call to the correct institution server.
 
+        Fault isolation guarantee: exceptions from one institution cannot
+        propagate here — they are caught inside InstitutionConnection.call_tool()
+        and returned as structured error dicts.
+
         Args:
             name:      Namespaced tool name, e.g. "uslugi__login".
             arguments: Dict of tool arguments from the LLM.
-
-        Returns:
-            List of MCP content items (usually a single TextContent).
         """
-        # Look up which institution owns this tool.
         slug = self._tool_routing.get(name)
 
         if slug is None:
-            # This should never happen if list_tools() is consistent, but
-            # guard against it so the agent gets a meaningful error message.
-            return [types.TextContent(
-                type="text",
-                text=f"Gateway error: unknown tool '{name}'. "
-                     f"Known tools: {list(self._tool_routing.keys())}",
-            )]
+            error_payload = json.dumps({
+                "error": True,
+                "code": "unknown_tool",
+                "message": f"Unknown tool '{name}'. This is a gateway configuration error.",
+            })
+            return [types.TextContent(type="text", text=error_payload)]
 
-        # Strip the "slug__" prefix to get the original tool name that the
-        # institution server registered.
-        # e.g.  "uslugi__login"  →  prefix="uslugi__"  →  original="login"
-        prefix = f"{slug}__"
-        original_name = name[len(prefix):]
+        connection = self._connections[slug]
 
-        # Retrieve the live session for this institution.
-        session = self._sessions[slug]
+        # Strip the "slug__" prefix to get the original tool name.
+        original_name = name[len(f"{slug}__"):]
 
-        print(f"[Gateway] Routing  {name}  →  {slug}:{original_name}  args={arguments}", file=sys.stderr)
+        print(
+            f"[Gateway] Routing  {name}  →  {slug}:{original_name}  "
+            f"args={arguments}  alive={connection.alive}",
+            file=sys.stderr,
+        )
 
-        # Delegate the call to the institution server.
-        try:
-            result = await session.call_tool(original_name, arguments=arguments)
-            # result.content is already a list of MCP content items.
-            return result.content
-
-        except Exception as exc:
-            # Surface institution-level errors as a text message so the LLM
-            # can decide how to handle them (e.g., suggest re-logging in).
-            error_msg = f"Institution '{slug}' returned an error for '{original_name}': {exc}"
-            print(f"[Gateway] ERROR: {error_msg}", file=sys.stderr)
-            return [types.TextContent(type="text", text=error_msg)]
+        # Delegate — fault isolation is inside InstitutionConnection.call_tool().
+        return await connection.call_tool(original_name, arguments)
 
     # ── Institution connection management ─────────────────────────────────────
 
-    async def connect_institutions(self, exit_stack: AsyncExitStack) -> None:
+    async def connect_institutions(self) -> None:
         """
-        Spawn all institution servers as subprocesses and connect to them.
+        Attempt to connect to every institution in config.yaml.
 
-        For each institution in config.yaml:
-          1. Build StdioServerParameters (command + args + working dir).
-          2. Use stdio_client() to spawn the subprocess and create IO streams.
-          3. Wrap those streams in a ClientSession and call initialize().
-          4. Fetch the tool list, namespace the names, and record routing.
+        FAULT ISOLATION: each institution is connected independently inside its
+        own try/except.  A failure in one does NOT abort the others — the
+        gateway continues with however many institutions succeeded.
 
-        All context managers (stdio_client, ClientSession) are pushed onto the
-        provided AsyncExitStack so they stay alive until the stack unwinds at
-        the end of run() — i.e., when the agent disconnects and the gateway exits.
-
-        Args:
-            exit_stack: An open AsyncExitStack that owns the subprocess lifetimes.
+        Institutions that fail to connect are excluded from the tool list.
+        The LLM will not see their tools and cannot call them.  If the user
+        asks about a service from a failed institution the LLM will answer
+        from general knowledge or say it is unavailable.
         """
         institutions_config: list[dict] = _gateway_config.get("institutions", [])
 
@@ -200,91 +377,87 @@ class GatewayServer:
             print("[Gateway] WARNING: No institutions defined in gateway/config.yaml.", file=sys.stderr)
             return
 
+        # Connect to all institutions concurrently — faster startup and one
+        # slow/hanging institution does not delay the others.
+        connect_tasks = []
         for inst in institutions_config:
             slug: str = inst["slug"]
             display_name: str = inst["name"]
-
-            # The config says "python" — replace it with the same interpreter
-            # that is running the gateway so we always use the venv Python,
-            # not whatever "python" resolves to on the system PATH.
             raw_command: str = inst["command"]
             command = sys.executable if raw_command in ("python", "python3") else raw_command
             args: list[str] = inst.get("args", [])
 
             print(f"[Gateway] Connecting to institution: {display_name} ({slug})", file=sys.stderr)
-            print(f"[Gateway]   Command: {command} {' '.join(args)}", file=sys.stderr)
 
-            # ── Spawn the institution subprocess ──────────────────────────────
-            # StdioServerParameters tells the MCP client how to launch the
-            # server process.  cwd=PROJECT_ROOT ensures that module-level
-            # imports (e.g. "from institutions.uslugi...") resolve correctly.
             server_params = StdioServerParameters(
                 command=command,
                 args=args,
                 cwd=str(PROJECT_ROOT),
             )
 
-            # stdio_client() is an async context manager that:
-            #   • Spawns the subprocess.
-            #   • Creates asyncio.Queue-based read/write streams over the pipes.
-            #   • On exit: closes the streams and terminates the subprocess.
-            #
-            # We push it onto exit_stack so the subprocess lives as long as
-            # the gateway itself.
-            read_stream, write_stream = await exit_stack.enter_async_context(
-                stdio_client(server_params)
-            )
+            conn = InstitutionConnection(slug, display_name, server_params)
+            self._connections[slug] = conn
+            connect_tasks.append(conn.connect())
 
-            # ── Wrap in an MCP ClientSession ──────────────────────────────────
-            # ClientSession handles the MCP JSON-RPC protocol: it sends
-            # "initialize" on entry and "close" on exit.
-            session = await exit_stack.enter_async_context(
-                ClientSession(read_stream, write_stream)
-            )
+        # gather() with return_exceptions=True means exceptions in individual
+        # coroutines are returned as values, not raised — perfect for isolation.
+        results = await asyncio.gather(*connect_tasks, return_exceptions=True)
 
-            # Perform the MCP handshake (sends initialize, waits for response).
-            await session.initialize()
+        # Register tools from every institution that connected successfully.
+        slugs = [inst["slug"] for inst in institutions_config]
+        names = [inst["name"] for inst in institutions_config]
 
-            # ── Fetch and namespace the institution's tools ───────────────────
-            tools_response = await session.list_tools()
+        for slug, display_name, result in zip(slugs, names, results):
+            if isinstance(result, Exception):
+                # gather() swallowed a raised exception — log and skip.
+                print(
+                    f"[Gateway] ✗ {display_name} ({slug}): "
+                    f"unexpected exception — {result}",
+                    file=sys.stderr,
+                )
+                continue
 
-            institution_tool_count = len(tools_response.tools)
+            conn = self._connections[slug]
+            if not conn.alive:
+                print(
+                    f"[Gateway]   {display_name} tools EXCLUDED from aggregated list.",
+                    file=sys.stderr,
+                )
+                continue
 
-            for tool in tools_response.tools:
-                # Build the namespaced name: "uslugi__login", "mojtermin__get_doctors_by_city" …
+            for tool in conn.tools:
                 namespaced_name = f"{slug}__{tool.name}"
-
-                # Record which institution handles this tool for routing.
                 self._tool_routing[namespaced_name] = slug
-
-                # Create a new Tool object with:
-                #   • The namespaced name (what the LLM will call).
-                #   • A description prefixed with "[PortalName] " so the LLM
-                #     knows which institution this tool interacts with.
-                #   • The original input schema (parameter definitions unchanged).
-                namespaced_tool = types.Tool(
+                self._tools.append(types.Tool(
                     name=namespaced_name,
                     description=f"[{display_name}] {tool.description or ''}",
                     inputSchema=tool.inputSchema,
-                )
-                self._tools.append(namespaced_tool)
+                ))
 
-            # Store the live session for later routing in _handle_call_tool.
-            self._sessions[slug] = session
+        alive_count = sum(1 for c in self._connections.values() if c.alive)
+        total_count = len(self._connections)
+        print(
+            f"\n[Gateway] Ready — {len(self._tools)} tools aggregated "
+            f"from {alive_count}/{total_count} institution(s).\n",
+            file=sys.stderr,
+        )
 
+        if alive_count < total_count:
+            failed = [
+                f"{s} ({c.display_name})"
+                for s, c in self._connections.items()
+                if not c.alive
+            ]
             print(
-                f"[Gateway] ✓ {display_name}: "
-                f"{institution_tool_count} tools registered "
-                f"({', '.join(t.name for t in tools_response.tools)})",
+                f"[Gateway] ⚠ Failed institutions (tools excluded): {', '.join(failed)}",
                 file=sys.stderr,
             )
 
-        total = len(self._tools)
-        institutions_count = len(self._sessions)
-        print(
-            f"\n[Gateway] Ready — {total} tools aggregated "
-            f"from {institutions_count} institution(s).\n",
-            file=sys.stderr,
+    async def disconnect_institutions(self) -> None:
+        """Gracefully tear down all institution subprocess connections."""
+        await asyncio.gather(
+            *(conn.disconnect() for conn in self._connections.values()),
+            return_exceptions=True,  # never raise during shutdown
         )
 
     # ── Main run loop ─────────────────────────────────────────────────────────
@@ -292,47 +465,27 @@ class GatewayServer:
     async def run(self) -> None:
         """
         Full gateway lifecycle:
-          1. Connect to all institution servers (spawn subprocesses).
+          1. Connect to institution servers (concurrently, fault-isolated).
           2. Open the gateway's own stdio transport to serve the agent.
           3. Block until the agent disconnects.
           4. Clean up all institution subprocess connections.
         """
-        async with AsyncExitStack() as exit_stack:
+        # ── Step 1: Connect to institutions ───────────────────────────────────
+        await self.connect_institutions()
 
-            # ── Step 1: Connect to institution servers ────────────────────────
-            # This spawns institution subprocesses and populates self._tools
-            # and self._sessions before the agent ever sends a request.
-            await self.connect_institutions(exit_stack)
-
-            # ── Step 2: Open the gateway's own stdio transport ────────────────
-            # stdio_server() creates an async context that reads from stdin and
-            # writes to stdout using the asyncio-streams-based MCP transport.
-            # This is the channel the agent (gemini_agent.py) communicates on.
-            #
-            # NOTE: At this point stdin IS the agent's connection.  We must not
-            # read from stdin for any other purpose after this line.
+        # ── Step 2 & 3: Open stdio transport and serve the agent ──────────────
+        try:
             async with stdio_server() as (read_stream, write_stream):
-
                 print("[Gateway] Stdio transport open — waiting for agent.", file=sys.stderr)
-
-                # ── Step 3: Run the MCP server protocol ───────────────────────
-                # server.run() enters the JSON-RPC message loop:
-                #   - Reads MCP requests from read_stream (agent → gateway).
-                #   - Dispatches them to our registered handlers.
-                #   - Writes responses to write_stream (gateway → agent).
-                # This call blocks until the agent closes the connection.
                 await self._server.run(
                     read_stream,
                     write_stream,
-                    # create_initialization_options() builds the standard MCP
-                    # server capabilities structure sent during the handshake.
                     self._server.create_initialization_options(),
                 )
-
+        finally:
             # ── Step 4: Cleanup ───────────────────────────────────────────────
-            # The AsyncExitStack unwinds here, closing all institution sessions
-            # and terminating their subprocess (in reverse order of registration).
             print("[Gateway] Agent disconnected. Shutting down institution servers.", file=sys.stderr)
+            await self.disconnect_institutions()
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────

@@ -29,7 +29,7 @@ export default function ChatInput({ onSend, disabled }) {
   };
 
   return (
-    <form onSubmit={handleSubmit} className="flex items-end gap-3 p-4 border-t border-gray-800 bg-gray-900">
+    <form onSubmit={handleSubmit} className="flex items-end gap-2 sm:gap-3 p-3 sm:p-4 border-t border-gray-800 bg-gray-900">
       <textarea
         ref={textareaRef}
         rows={1}

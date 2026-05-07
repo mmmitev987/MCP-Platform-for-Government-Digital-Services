@@ -1,13 +1,17 @@
-const SUGGESTIONS = [
-  "What documents do I need to renew my passport?",
-  "How do I get a first-time ID card?",
-  "Find available doctors in Skopje",
-  "What are the requirements for a driver's license?",
-  "How do I register a new vehicle?",
-  "What is needed for citizenship naturalization?",
-];
+import { useTranslation } from "react-i18next";
 
 export default function SuggestedQuestions({ onSelect }) {
+  const { t } = useTranslation();
+
+  const SUGGESTIONS = [
+    t("assistant.suggestions.passport"),
+    t("assistant.suggestions.idCard"),
+    t("assistant.suggestions.doctors"),
+    t("assistant.suggestions.driverLicense"),
+    t("assistant.suggestions.vehicle"),
+    t("assistant.suggestions.citizenship"),
+  ];
+
   return (
     <div className="flex flex-wrap gap-2 justify-center">
       {SUGGESTIONS.map((q) => (

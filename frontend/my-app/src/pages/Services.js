@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { getInstitutions, connectInstitution, disconnectInstitution } from "../api/services";
 import InstitutionModal from "../components/services/InstitutionModal";
 
@@ -9,6 +10,7 @@ const INSTITUTION_ICONS = {
 };
 
 export default function Services() {
+  const { t } = useTranslation();
   const [institutions, setInstitutions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [toggling, setToggling] = useState(null);
@@ -35,16 +37,14 @@ export default function Services() {
   };
 
   return (
-    <div className="p-8">
+    <div className="p-4 sm:p-6 lg:p-8">
       <div className="mb-8">
-        <h2 className="text-2xl font-bold text-white">Services</h2>
-        <p className="text-gray-400 mt-1">
-          Connected government platforms. Disconnected services are hidden from the AI assistant.
-        </p>
+        <h2 className="text-2xl font-bold text-white">{t("services.title")}</h2>
+        <p className="text-gray-400 mt-1">{t("services.subtitle")}</p>
       </div>
 
       {loading ? (
-        <div className="text-gray-500 text-sm">Loading...</div>
+        <div className="text-gray-500 text-sm">{t("services.loading")}</div>
       ) : (
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
           {institutions.map((inst) => (
@@ -75,12 +75,8 @@ export default function Services() {
                       : "bg-gray-800 text-gray-500"
                   }`}
                 >
-                  <span
-                    className={`w-1.5 h-1.5 rounded-full ${
-                      inst.connected ? "bg-green-400" : "bg-gray-500"
-                    }`}
-                  />
-                  {inst.connected ? "Connected" : "Disconnected"}
+                  <span className={`w-1.5 h-1.5 rounded-full ${inst.connected ? "bg-green-400" : "bg-gray-500"}`} />
+                  {inst.connected ? t("services.connected") : t("services.disconnected")}
                 </span>
               </div>
 
@@ -103,14 +99,14 @@ export default function Services() {
                   {toggling === inst.slug
                     ? "..."
                     : inst.connected
-                    ? "Disconnect"
-                    : "Connect"}
+                    ? t("services.disconnect")
+                    : t("services.connect")}
                 </button>
                 <button
                   onClick={() => setDetailInstitution(inst)}
                   className="text-xs px-3 py-1.5 rounded-lg font-medium border border-gray-700 text-gray-400 hover:text-white hover:border-gray-600 transition-colors"
                 >
-                  More Details
+                  {t("services.moreDetails")}
                 </button>
               </div>
             </div>

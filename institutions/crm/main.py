@@ -58,30 +58,43 @@ mcp = FastMCP("crm-com-mk", lifespan=lifespan)
 @mcp.tool()
 async def search_companies(name: str) -> list[dict]:
     """
-    Search for registered companies in the Central Registry by name.
+    Search for registered companies in the Central Registry by name. Always call
+    this FIRST — every other CRM tool requires the leid returned here.
 
     Supports partial name matching in both Cyrillic and Latin script.
-    Uses a real browser internally so reCAPTCHA is handled automatically.
+    reCAPTCHA is handled automatically by the internal Playwright browser.
+    No login required.
 
     Args:
-        name: Full or partial company name. E.g. "Бисера" or "Bisera".
+        name: Full or partial company name. Examples:
+            "Бисера"   — Cyrillic partial name
+            "Bisera"   — Latin transliteration also works
+            "МКД"      — abbreviation search
 
     Returns:
         List of matching companies, each with:
             - fullName      Full legal name (Cyrillic)
-            - fullNameLat   Full legal name (Latin transliteration)
-            - leid          Unique company ID — pass this to all follow-up tools
+            - fullNameLat   Full legal name (Latin)
+            - leid          Unique company ID — required by all follow-up tools
             - municipality  Municipality of registration
+        On error: [{ "error": true, "code": str, "message": str }]
     """
     return await crm_browser.search_companies(name)
 
 
 @mcp.tool()
-async def get_company_details(leid: int) -> dict | str:
+async def get_company_details(leid: int) -> dict:
     """
-    Get the full registration profile for a specific company.
+    Get the full registration profile for a company (address, status, legal form,
+    registration number, business activity).
 
-    Call search_companies() first to get the leid, then pass it here.
+    Prerequisite: call search_companies() first to obtain the leid.
+    Call this when the user asks for general company information.
+    Do NOT call this if the user asked specifically about people/ownership
+    (use get_founders_and_directors) or finances (use get_annual_reports).
+    Never call more than one detail tool unless the user explicitly asked for both.
+
+    No login required.
 
     Args:
         leid: Unique company ID from search_companies().
@@ -89,37 +102,61 @@ async def get_company_details(leid: int) -> dict | str:
     Returns:
         Dict with full registration details: address, status, registration
         number, legal form, and business activity.
-        Returns "Company not found" if the ID is invalid.
+        On error: { "error": true, "code": str, "message": str }
     """
     return await crm_browser.get_company_details(leid)
 
 
 @mcp.tool()
-async def get_founders_and_directors(leid: int) -> list[dict] | str:
+async def get_founders_and_directors(leid: int) -> list[dict]:
     """
-    Get the founders, directors, and other associated persons for a company.
+    Get founders, directors, and other associated persons for a company.
+
+    Prerequisite: call search_companies() first to obtain the leid.
+    Call this ONLY when the user asks about people — ownership, founders,
+    directors, or management. Do NOT call this for general company info
+    (use get_company_details) or financial data (use get_annual_reports).
+
+    IMPORTANT: This data is NOT available on the free public tier of crm.com.mk.
+    If the registry does not expose it, the tool returns an error explaining
+    that the data requires a paid subscription. Do NOT retry or call another
+    tool — inform the user directly.
+
+    No login required.
 
     Args:
         leid: Unique company ID from search_companies().
 
     Returns:
         List of associated persons with their role and identification details.
-        Returns a message if data is not available on the free public tier.
+        On error: { "error": true, "code": str, "message": str }
     """
     return await crm_browser.get_founders_and_directors(leid)
 
 
 @mcp.tool()
-async def get_annual_reports(leid: int) -> list[dict] | str:
+async def get_annual_reports(leid: int) -> list[dict]:
     """
-    Get available annual reports and financial data for a company.
+    Get available annual reports and financial filing data for a company.
+
+    Prerequisite: call search_companies() first to obtain the leid.
+    Call this ONLY when the user asks about finances, annual reports, or
+    financial statements. Do NOT call this for general info (get_company_details)
+    or people/ownership (get_founders_and_directors).
+
+    IMPORTANT: This data is NOT available on the free public tier of crm.com.mk.
+    If the registry does not expose it, the tool returns an error explaining
+    that the data requires a paid subscription. Do NOT retry or call another
+    tool — inform the user directly.
+
+    No login required.
 
     Args:
         leid: Unique company ID from search_companies().
 
     Returns:
         List of annual reports with year, filing status, dates, and links.
-        Returns a message if data is not available on the free public tier.
+        On error: { "error": true, "code": str, "message": str }
     """
     return await crm_browser.get_annual_reports(leid)
 

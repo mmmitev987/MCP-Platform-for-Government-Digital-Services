@@ -37,15 +37,33 @@ mcp = FastMCP("mon-gov-mk")
 # ═══════════════════════════════════════════════════════════════════════════════
 
 @mcp.tool()
+def check_session_mon() -> dict:
+    """
+    Check whether an active MON session exists (local check, no network).
+
+    Call this FIRST before login_mon() — if a session is already active,
+    there is no need to open a browser. Also call before any tool that
+    requires authentication (get_mon_service_requirements).
+
+    Returns:
+        { "active": bool, "saved_at": str | None, "message": str }
+        On error: { "error": true, "code": str, "message": str }
+    """
+    return _check_session()
+
+
+@mcp.tool()
 def login_mon() -> dict:
     """
     Log in to e-uslugi.mon.gov.mk via browser and save the session.
 
-    Opens a Chromium window for the user to complete login.
-    Required before calling get_mon_service_requirements.
+    Call this ONLY when check_session_mon() reports no active session AND
+    the user needs an authenticated action (e.g. get_mon_service_requirements).
+    Do NOT call without user consent — it opens a visible Chromium window.
 
     Returns:
         { "success": bool, "message": str }
+        On error: { "error": true, "code": str, "message": str }
     """
     return _login()
 
@@ -55,21 +73,14 @@ def logout_mon() -> dict:
     """
     Log out of e-uslugi.mon.gov.mk by deleting the stored session.
 
+    Call this ONLY when the user explicitly asks to log out.
+    No network request is made — this only deletes local session files.
+
     Returns:
         { "success": bool, "message": str }
+        On error: { "error": true, "code": str, "message": str }
     """
     return _logout()
-
-
-@mcp.tool()
-def check_session_mon() -> dict:
-    """
-    Check whether an active MON session exists.
-
-    Returns:
-        { "active": bool, "saved_at": str | None, "message": str }
-    """
-    return _check_session()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -79,16 +90,25 @@ def check_session_mon() -> dict:
 @mcp.tool()
 def list_mon_services(page: int = 0, size: int = 20) -> dict:
     """
-    List all currently active MON services and contests from e-uslugi.mon.gov.mk.
+    List active MON services and contests from e-uslugi.mon.gov.mk.
 
-    No login required.
+    Call this when the user asks what services or competitions are currently
+    open at the Ministry of Education. No login required.
+    Do NOT confuse with list_mon_document_types — that tool is for official
+    education documents (diplomas, transcripts, certificates), not services.
+    Never call both in the same turn unless the user explicitly asked for both.
 
     Args:
         page: Page number (0-based). Default 0.
         size: Results per page. Default 20.
 
     Returns:
-        { "services": list of { id, name, reference_number, active_from, active_to, apply_url }, "count": int }
+        {
+            "services": list of { id, name, reference_number, active_from,
+                                   active_to, apply_url },
+            "count": int
+        }
+        On error: { "error": true, "code": str, "message": str }
     """
     return _list_mon_services(page=page, size=size)
 
@@ -96,12 +116,12 @@ def list_mon_services(page: int = 0, size: int = 20) -> dict:
 @mcp.tool()
 def get_mon_service_requirements(service_id: int) -> dict:
     """
-    Find out what you need in order to apply for a specific MON service or contest.
+    Get what documents are required to apply for a specific MON service or contest.
 
-    Returns the service name, application period, whether you can currently
-    apply, and the list of documents you need to upload.
-
-    Requires an active MON session — call login_mon() first.
+    Prerequisite: call list_mon_services() to get the service_id, then call
+    check_session_mon() and login_mon() if the session is inactive.
+    Requires an active MON session — do NOT call without authentication.
+    Do NOT call this just to confirm a service exists; use list_mon_services for that.
 
     Args:
         service_id: Numeric ID from list_mon_services().
@@ -117,6 +137,7 @@ def get_mon_service_requirements(service_id: int) -> dict:
             "documents_required": list[str],
             "apply_url":          str,
         }
+        On error: { "error": true, "code": str, "message": str }
     """
     return _get_mon_service_requirements(service_id=service_id)
 
@@ -128,13 +149,19 @@ def get_mon_service_requirements(service_id: int) -> dict:
 @mcp.tool()
 def list_mon_document_types() -> dict:
     """
-    List official document types obtainable through MON or a higher-education
-    institution, with a brief description of each.
+    List the types of official education documents obtainable through MON or a
+    higher-education institution (e.g. enrollment certificate, diploma, transcript).
+
+    Call this when the user asks about education documents — certificates,
+    diplomas, transcript of records, scholarship confirmations, or diploma
+    recognition. Do NOT confuse with list_mon_services — that tool lists
+    active MON services and competitions, not document types.
 
     No login required.
 
     Returns:
         { "document_types": list of { type, name, description } }
+        On error: { "error": true, "code": str, "message": str }
     """
     return _list_mon_document_types()
 
@@ -142,21 +169,25 @@ def list_mon_document_types() -> dict:
 @mcp.tool()
 def get_mon_document_requirements(document_type: str) -> dict:
     """
-    Find out what you need in order to obtain a specific official document
-    from MON or a higher-education institution.
+    Get the requirements (documents, conditions, fees, where to apply) for
+    obtaining a specific official education document.
 
-    No login required.
+    Prerequisite: call list_mon_document_types() to get the valid type key,
+    then pass it here. Do NOT guess type keys — only use values returned by
+    list_mon_document_types(). No login required.
 
     Args:
         document_type: Type key from list_mon_document_types(). Examples:
             "потврда_за_запис"     — Certificate of enrollment
             "уверение_за_завршено" — Graduation certificate
-            "нострификација"       — Diploma recognition
+            "нострификација"       — Diploma recognition (nostrification)
             "уверение_стипендија"  — Scholarship confirmation
             "уверение_оценки"      — Transcript of records
 
     Returns:
-        { document_type, name, description, documents_required, conditions, fee, where_to_apply }
+        { document_type, name, description, documents_required, conditions,
+          fee, where_to_apply }
+        On error: { "error": true, "code": str, "message": str }
     """
     return _get_mon_document_requirements(document_type=document_type)
 

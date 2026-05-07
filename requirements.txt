@@ -12,8 +12,10 @@ playwright
 # ── HTTP client (tool requests and http-based auth fallback) ─────────────────
 requests
 
-# ── OpenAI SDK ───────────────────────────────────────────────────────────────
+# ── LLM SDKs ─────────────────────────────────────────────────────────────────
+# Install both so any team member can switch provider via LLM_PROVIDER in .env
 openai
+google-genai
 
 # ── Environment variable loading (.env file support) ─────────────────────────
 python-dotenv
