@@ -21,7 +21,8 @@ Flow:
   4. Capture all cookies for the portal domain.
   5. Return them as a plain dict so the caller can pass them to SessionManager.
 """
-
+import sys
+import io
 import asyncio
 import concurrent.futures
 from typing import Optional
@@ -33,6 +34,11 @@ from playwright.async_api import (
     TimeoutError as PlaywrightTimeout,
 )
 
+# Fix Windows console encoding — prevents 'charmap' codec errors
+# when printing Unicode/Cyrillic characters to the terminal.
+if sys.platform == "win32":
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
 
 class BrowserAuthenticator:
     """
