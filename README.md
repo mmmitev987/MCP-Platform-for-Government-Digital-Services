@@ -122,12 +122,20 @@ MCP-Platform-for-Government-Digital-Services/
 - Python 3.11+
 - Node.js 18+
 - A free [Google AI Studio](https://aistudio.google.com) API key
+- Chromium/Google Chrome + matching ChromeDriver (required for Selenium-based institution tools, e.g. Agencija za Vrabotuvanje)
 
 ### 1. Clone and install Python dependencies
 
 ```bash
 pip install -r requirements.txt
 python -m playwright install chromium
+```
+
+If you're running in Linux CI/server environments, also install a browser + driver for Selenium:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y chromium-browser chromium-chromedriver
 ```
 
 ### 2. Configure environment variables
