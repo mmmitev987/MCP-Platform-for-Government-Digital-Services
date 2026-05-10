@@ -131,8 +131,8 @@ pip install -r requirements.txt
 python -m playwright install chromium
 ```
 
-If you're running in Linux CI/server environments, also install a browser + driver for Selenium.
-Install package names vary by distro; for Debian/Ubuntu use the Chromium + ChromeDriver package names available in your apt repositories:
+If you're running Selenium-based institutions (for example Agencija za Vrabotuvanje) in Linux CI/server environments, also install a browser + driver for Selenium.
+Package names and availability vary by distro/version, so verify names in your repository before installing. For Debian/Ubuntu, install the Chromium + ChromeDriver packages available in apt:
 
 ```bash
 sudo apt-get update
