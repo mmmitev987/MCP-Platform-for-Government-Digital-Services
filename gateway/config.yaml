@@ -109,3 +109,24 @@ institutions:
       - "Call get_mon_service_requirements only when the user needs to know what documents to upload."
       - "For document questions (certificates, transcripts, diplomas), use list_mon_document_types and get_mon_document_requirements — these do NOT require login."
       - "Never call list_mon_services and get_mon_service_requirements in the same turn unless you already have the specific service ID."
+
+  - slug: katastar
+    name: "e-uslugi.katastar.gov.mk"
+    command: python
+    args:
+      - "-m"
+      - "institutions.katastar.main"
+    description: >
+      Cadastre (real estate registry) services: authentication, municipality search,
+      parcel lookup, property certificates (имотен лист), building records,
+      parcel geometry, total parcel area, and favorites management.
+      tool_rules:
+      - "Always call login first if the user is not authenticated."
+      - "Call search_municipality to get departmentID and municipalityID before any property query."
+      - "Call find_parcels to list parcels for a given имотен лист number."
+      - "Call find_buildings to list buildings for a given имотен лист number."
+      - "Call get_total_parcel_area to get the total area and document type for a имотен лист."
+      - "Call check_property_favorited only when the user asks about saved/favorite properties."
+      - "Call check_session before authenticated requests to verify session is active."
+      - "Call logout only when the user explicitly asks to log out."
+      - "Translate queries: 'property'→'имот', 'parcel'→'парцела', 'municipality'→'општина', 'building'→'зграда', 'certificate'→'имотен лист'."
