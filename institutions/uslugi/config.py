@@ -48,6 +48,11 @@ SESSION_FILE: Path = PROJECT_ROOT / _session_file_rel
 # portal generates a fresh short-lived wctx token in the SSO redirect URL.
 LOGIN_URL: str = PORTAL_BASE_URL
 
+# URL path that indicates a redirect to the login page (session expired).
+# Used by AuthenticatedClient._check_response() to detect silent redirects.
+# Must be specific enough to NOT match normal API response URLs.
+LOGIN_REDIRECT_URL: str = PORTAL_BASE_URL + "/login.nspx"
+
 # Substring of the hostname we wait for after a successful SSO round-trip.
 # Once the browser's URL hostname contains this string, we know login worked.
 POST_LOGIN_HOSTNAME: str = "uslugi.gov.mk"

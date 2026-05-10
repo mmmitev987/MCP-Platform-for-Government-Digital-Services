@@ -16,20 +16,13 @@ without knowing about the shared/ layer.
 
 from shared.http_client import AuthenticatedClient, SessionExpiredError  # re-export
 from institutions.uslugi.auth.session import session_manager
-from institutions.uslugi.config import PORTAL_BASE_URL, LOGIN_URL, COOKIE_DOMAIN
+from institutions.uslugi.config import PORTAL_BASE_URL, LOGIN_REDIRECT_URL, COOKIE_DOMAIN
 
 authenticated_client = AuthenticatedClient(
-    session_manager=session_manager,#  - tells the client where to load cookies from. When you call authenticated_client.get(),
-    # the first thing it does is call session_manager.load() to get the saved cookies off disk.
-    portal_base_url=PORTAL_BASE_URL, # — used to set the Origin and Referer headers on every request
-    # ("Origin": "https://uslugi.gov.mk"). Without these the portal's server would see a request coming from "nowhere" and might block it.
-
-    login_url=LOGIN_URL, # — used to detect silent redirects. Some portals don't return 401 when your session expires —
-    # they just silently redirect you to the login page with HTTP 200. The client checks if the final response URL contains login_url and if so raises SessionExpiredError.
-
-    cookie_domain=COOKIE_DOMAIN, #  — tells requests which domain the cookies belong to ("uslugi.gov.mk").
-    # This ensures the cookies are only sent to that domain and not leaked to any other host the request might pass through.
-
+    session_manager=session_manager,
+    portal_base_url=PORTAL_BASE_URL,
+    login_url=LOGIN_REDIRECT_URL,
+    cookie_domain=COOKIE_DOMAIN,
 )
 
 # Make SessionExpiredError importable from this module so tool files don't

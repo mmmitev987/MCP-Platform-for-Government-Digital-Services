@@ -54,6 +54,9 @@ institutions:
       - "Never call search_services AND list_all_services for the same query."
       - "Never call get_service_requirements just to confirm a service exists."
       - "Translate queries: 'passport'→'пасош', 'ID card'→'лична карта', 'driver licence'→'возачка дозвола', 'vehicle registration'→'регистрација на возило'."
+      - "To apply for a service programmatically: call list_registry_services to find the service_name, then apply_service."
+      - "Call inspect_service before apply_service if you need to know what form fields are required."
+      - "apply_service and inspect_service require login — call check_session first, then login if needed."
 
   - slug: mojtermin
     name: "mojtermin.mk"

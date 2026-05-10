@@ -97,8 +97,16 @@ def check_session() -> dict:
         or on error: { "error": True, "code": str, "message": str }
     """
     try:
+        # is_present() only checks if the file exists on disk.
+        # saved_at() actually decrypts — if it returns None while the file exists,
+        # the session is from a previous server run and cannot be used.
         active = session_manager.is_present()
-        saved_at = session_manager.saved_at() if active else None
+        saved_at = None
+        if active:
+            saved_at = session_manager.saved_at()
+            if saved_at is None:
+                # File exists but can't be decrypted (stale from previous run)
+                active = False
     except Exception as exc:
         return tool_error("unexpected_error", f"Failed to read session state: {exc}")
 

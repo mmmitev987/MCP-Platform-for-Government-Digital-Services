@@ -18,6 +18,11 @@ from institutions.uslugi.tools.discovery import (
     get_service_details as _get_details,
     list_all_services as _list_all_services,
 )
+from institutions.uslugi.tools.services import (
+    list_services as _list_registry_services,
+    apply_service as _apply_service,
+    inspect_service as _inspect_service,
+)
 
 mcp = FastMCP("uslugi-gov-mk")
 
@@ -158,6 +163,83 @@ def get_service_requirements(service_id: int) -> dict:
         On error: { "error": true, "code": str, "message": str }
     """
     return _get_details(service_id)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# E-SERVICE REGISTRY & APPLICATION TOOLS  (login required for apply/inspect)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@mcp.tool()
+def list_registry_services(institution: str = "") -> dict:
+    """
+    List e-services available for programmatic application on uslugi.gov.mk.
+
+    These are services that can be applied for directly through the platform,
+    organized by institution (e.g. PIOM, courts, employment agency).
+
+    Args:
+        institution: Filter by institution slug. Available slugs:
+            "piom", "sudovi", "nbrsm", "sluzhben_vesnik", "vrabotuvanje",
+            "mdt", "pravda", "fzo", "vlada", "kultura", "film".
+            Leave empty to list all institutions and their service counts.
+
+    Returns:
+        { "institutions": [...] } when no filter is given.
+        { "institution": str, "services": [...] } when filtered.
+        { "error": str } if the institution slug is unknown.
+    """
+    return _list_registry_services(institution)
+
+
+@mcp.tool()
+def apply_service(
+    service_name: str,
+    phone: str = "",
+    email: str = "",
+    company_uin: str = "0",
+) -> dict:
+    """
+    Apply for a specific e-service on uslugi.gov.mk.
+
+    REQUIRES an active login session — call login() first if not authenticated.
+
+    The service_name must match a registered service. Call list_registry_services()
+    to see all available names. Common examples:
+      - get_credit_registry_data          (credit registry from National Bank)
+      - get_criminal_record_person        (criminal record certificate)
+      - get_pension_registry_certificate  (pension fund certificate)
+      - get_employment_history            (employment history)
+      - get_health_insurance_status       (health insurance status)
+      - get_personal_data_certificate     (personal data from civil registry)
+
+    Args:
+        service_name: Registered service function name (from list_registry_services).
+        phone: Optional phone number in +389XXXXXXXX format.
+        email: Optional email address.
+        company_uin: Company UIN for legal entity services (default "0" for citizens).
+
+    Returns:
+        { "success": bool, "message": str, "service": str, "data": dict | None, "error": str | None }
+    """
+    return _apply_service(service_name, phone, email, company_uin)
+
+
+@mcp.tool()
+def inspect_service(service_name: str) -> dict:
+    """
+    Inspect a service's configuration and form schema (read-only, safe).
+
+    Use this to check what fields a service requires before applying.
+    Requires an active login session.
+
+    Args:
+        service_name: Registered service function name (from list_registry_services).
+
+    Returns:
+        Dict with service config, form fields, and pre-filled user data.
+        On error: { "error": str }
+    """
+    return _inspect_service(service_name)
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
