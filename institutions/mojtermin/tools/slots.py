@@ -14,6 +14,7 @@ Available tools:
 """
 
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 
 from institutions.mojtermin.tools.appointments import (
@@ -21,17 +22,21 @@ from institutions.mojtermin.tools.appointments import (
     _flat,
     _pat,
     _parse_slots,
-    is_doctor,
     MojTerminError,
     normalize,
 )
+from institutions.shared.errors import tool_error
 
 
 def _find_resource(name: str) -> dict | None:
     """Find a single resource node by name (case-insensitive, Latin-aware)."""
+    try:
+        flat = _flat()
+    except MojTerminError as e:
+        raise e  # let caller (public functions) turn it into tool_error
     pattern = _pat(name)
     return next(
-        (n for n in _flat() if n.get("id") and pattern.search(normalize(n["name"]))),
+        (n for n in flat if n.get("id") and pattern.search(normalize(n["name"]))),
         None,
     )
 
@@ -40,6 +45,7 @@ def _fetch_slots(name: str) -> tuple[dict | None, list[dict]]:
     """Shared lookup + fetch used by every slot function.
 
     Returns (resource_node, parsed_slots) or (None, []) if not found.
+    Raises MojTerminError on network/API errors.
     """
     resource = _find_resource(name)
     if not resource:
@@ -66,11 +72,15 @@ def get_available_slots(name: str, date: str) -> dict:
             "resource_id"    — internal API id,
             "date"           — the requested date,
             "available_slots" — list of "HH:MM" strings (empty if none).
-        If the resource is not found, returns {"error": "Resource not found: '…'"}.
+        If the resource is not found, returns { "error": true, "code": "not_found", "message": str }.
+        On network error: { "error": true, "code": str, "message": str }
     """
-    resource, slots = _fetch_slots(name)
+    try:
+        resource, slots = _fetch_slots(name)
+    except MojTerminError as e:
+        return tool_error("network_error", str(e))
     if not resource:
-        return {"error": f"Resource not found: '{name}'"}
+        return tool_error("not_found", f"Resource not found: '{name}'")
     return {
         "resource": resource["name"],
         "resource_id": resource["id"],
@@ -93,11 +103,15 @@ def get_slots_range(name: str, start_date: str, end_date: str) -> dict:
             "resource"       — canonical resource name,
             "resource_id"    — internal API id,
             "slots_by_date"  — dict mapping each date with slots to a list of "HH:MM" strings.
-        If the resource is not found, returns {"error": "Resource not found: '…'"}.
+        If the resource is not found, returns { "error": true, "code": "not_found", "message": str }.
+        On network error: { "error": true, "code": str, "message": str }
     """
-    resource, slots = _fetch_slots(name)
+    try:
+        resource, slots = _fetch_slots(name)
+    except MojTerminError as e:
+        return tool_error("network_error", str(e))
     if not resource:
-        return {"error": f"Resource not found: '{name}'"}
+        return tool_error("not_found", f"Resource not found: '{name}'")
     by_date: dict[str, list] = defaultdict(list)
     for s in slots:
         if start_date <= s["date"] <= end_date:
@@ -120,13 +134,18 @@ def get_first_available(name: str, days_ahead: int = 30) -> dict:
     Returns:
         Dict with keys "resource", "resource_id", "date", "time" for the first
         available slot, or a message dict if no slots are found within the window.
-        If the resource is not found, returns {"error": "Resource not found: '…'"}.
+        If the resource is not found, returns { "error": true, "code": "not_found", "message": str }.
+        On network error: { "error": true, "code": str, "message": str }
     """
-    resource, slots = _fetch_slots(name)
+    try:
+        resource, slots = _fetch_slots(name)
+    except MojTerminError as e:
+        return tool_error("network_error", str(e))
     if not resource:
-        return {"error": f"Resource not found: '{name}'"}
-    today = str(datetime.today().date())
-    end   = str((datetime.today() + timedelta(days=days_ahead)).date())
+        return tool_error("not_found", f"Resource not found: '{name}'")
+    now = datetime.today()
+    today = str(now.date())
+    end   = str((now + timedelta(days=days_ahead)).date())
     first = next((s for s in slots if today <= s["date"] <= end), None)
     if not first:
         return {"message": f"No slots in the next {days_ahead} days for '{resource['name']}'"}
@@ -152,11 +171,15 @@ def get_availability_summary(name: str, days_ahead: int = 14) -> dict:
             "resource"    — canonical resource name,
             "resource_id" — internal API id,
             "summary"     — list of {"date": str, "count": int} for each day.
-        If the resource is not found, returns {"error": "Resource not found: '…'"}.
+        If the resource is not found, returns { "error": true, "code": "not_found", "message": str }.
+        On network error: { "error": true, "code": str, "message": str }
     """
-    resource, slots = _fetch_slots(name)
+    try:
+        resource, slots = _fetch_slots(name)
+    except MojTerminError as e:
+        return tool_error("network_error", str(e))
     if not resource:
-        return {"error": f"Resource not found: '{name}'"}
+        return tool_error("not_found", f"Resource not found: '{name}'")
     today = datetime.today().date()
     end   = today + timedelta(days=days_ahead)
     counts: dict[str, int] = defaultdict(int)
@@ -172,16 +195,23 @@ def get_availability_summary(name: str, days_ahead: int = 14) -> dict:
     }
 
 
-def get_slots_for_city(city_name: str, date: str) -> list[dict]:
+def get_slots_for_city(
+    city_name: str,
+    date: str,
+    max_resources: int = 50,
+    max_workers: int = 10,
+) -> list[dict] | dict:
     """
     Return available slots for all resources in a city on a given date.
 
-    This queries every doctor and institution under the city and aggregates
-    results. May be slow for large cities as each resource makes a separate API call.
+    Queries resources concurrently using a thread pool for speed.
+    May be slow for large cities — use max_resources to cap the query count.
 
     Args:
-        city_name: City name, e.g. "Скопје" or "Skopje" (Latin supported).
-        date:      Date in YYYY-MM-DD format.
+        city_name:    City name, e.g. "Скопје" or "Skopje" (Latin supported).
+        date:         Date in YYYY-MM-DD format.
+        max_resources: Max resources to query (default 50). Pass 0 for unlimited.
+        max_workers:  Thread pool size (default 10).
 
     Returns:
         List of dicts, each with keys:
@@ -190,23 +220,59 @@ def get_slots_for_city(city_name: str, date: str) -> list[dict]:
             "clinic"      — parent clinic name,
             "slots"       — list of "HH:MM" strings available on the date.
         Only resources with at least one slot are included.
+        On network error: { "error": true, "code": str, "message": str }
     """
     from institutions.mojtermin.tools.resources import get_resources_by_city
 
-    results = []
-    for r in get_resources_by_city(city_name):
+    try:
+        resources = get_resources_by_city(city_name)
+    except MojTerminError as e:
+        return tool_error("network_error", str(e))
+    if isinstance(resources, dict) and resources.get("error"):
+        return resources
+
+    if max_resources > 0:
+        resources = resources[:max_resources]
+
+    def _fetch_one(r: dict) -> dict | None:
         try:
             slots = [
-                s["time"] for s in _parse_slots(_get(f"/api/pp/resources/{r['id']}/slots_availability"))
+                s["time"]
+                for s in _parse_slots(_get(f"/api/pp/resources/{r['id']}/slots_availability"))
                 if s["date"] == date
             ]
             if slots:
-                results.append({
+                return {
                     "resource": r["name"],
                     "resource_id": r["id"],
                     "clinic": r["clinic"],
                     "slots": slots,
-                })
+                }
+            return None
         except MojTerminError:
-            continue
+            return {"_error": True}
+
+    total = len(resources)
+    results = []
+    failures = 0
+
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        futures = {pool.submit(_fetch_one, r): r for r in resources}
+        for future in as_completed(futures):
+            out = future.result()
+            if out is None:
+                continue
+            if isinstance(out, dict) and out.get("_error"):
+                failures += 1
+            else:
+                results.append(out)
+
+    if total > 0 and failures == total:
+        return tool_error(
+            "network_error",
+            f"All {total} resource(s) in '{city_name}' failed to respond. "
+            "The mojtermin.mk portal may be temporarily unavailable.",
+        )
+
+    results.sort(key=lambda x: x["resource"])
     return results
