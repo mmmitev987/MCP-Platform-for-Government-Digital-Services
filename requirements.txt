@@ -29,6 +29,11 @@ cryptography
 # PyYAML is the standard Python YAML library.
 PyYAML
 
+# ── Selenium browser automation ───────────────────────────────────────────────
+selenium
+
+# ── HTML parsing (BeautifulSoup) ─────────────────────────────────────────────
+beautifulsoup4
 # ── FastAPI web framework + server ───────────────────────────────────────────
 fastapi
 uvicorn[standard]

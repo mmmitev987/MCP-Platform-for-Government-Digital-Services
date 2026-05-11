@@ -61,6 +61,7 @@ institutions:
     args:
       - "-m"
       - "institutions.mojtermin.main"
+
     description: >
       Medical appointment booking: find clinics and doctors by city or
       specialty, and check available appointment slots. No login required.
@@ -99,6 +100,30 @@ institutions:
       - "  - get_annual_reports if the user asks about finances or annual filings."
       - "Never call more than one detail tool unless the user explicitly asked for both."
       - "Never call any detail tool without first getting the leid from search_companies."
+
+  - slug: agencijaZaVrabotuvanje
+    name: "e-rabota.av.gov.mk"
+    command: python
+    args:
+      - "-m"
+      - "institutions.agencijaZaVrabotuvanje.main"
+    description: >
+      Employment Agency portal: browse and search job ads, manage user CVs,
+      view dashboard data, save favourite jobs, and send job invitations.
+    tool_rules:
+      - "Call viewJobs when the user wants to browse active job ads."
+      - "Call searchJobs when the user searches jobs by occupation, employment center, or municipality."
+      - "Call getJobDetails only after a job ad has been selected from previous results."
+      - "Call login before authenticated actions if the user is not logged in."
+      - "Call viewCV when the user asks to see their CVs."
+      - "Call createCV when the user wants to create a new CV."
+      - "Call editCV when the user wants to update an existing CV."
+      - "Call downloadCV when the user wants to download/export a CV."
+      - "Call saveJobFavourite only after a job ad has been selected."
+      - "Call viewFavouriteJobs when the user asks for saved/favourite jobs."
+      - "Call removeFavouriteJob only after a favourite job has been selected."
+      - "Call sendJobInvitation only after a job ad has been selected."
+      - "Never ask the user for internal IDs such as cv_id or oglas_id; use IDs from previous tool results."
 
   - slug: mon
     name: "e-uslugi.mon.gov.mk"
@@ -139,3 +164,4 @@ institutions:
       - "Call check_session before authenticated requests to verify session is active."
       - "Call logout only when the user explicitly asks to log out."
       - "Translate queries: 'property'→'имот', 'parcel'→'парцела', 'municipality'→'општина', 'building'→'зграда', 'certificate'→'имотен лист'."
+

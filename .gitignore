@@ -2,6 +2,8 @@
 .env
 
 # ── Encrypted session storage ────────────────────────────────────────────────
+# The file contains encrypted cookies – still sensitive, keep out of VCS.
+storage/session.enc
 # All .enc files under storage/ contain encrypted tokens – keep out of VCS.
 storage/*.enc
 
