@@ -681,6 +681,24 @@ class ChatService:
         session_id: int | None = None,
         disabled_institutions: set[str] | None = None,
     ) -> tuple[str, int, list[str], dict | None]:
+        """
+        Process a user message through the AI agent and return the response.
+
+        Args:
+            user_id: Database ID of the user sending the message.
+            message: The user's message text.
+            db: SQLAlchemy database session.
+            session_id: Optional existing chat session ID to continue.
+            disabled_institutions: Optional set of institution slugs to exclude from tools.
+
+        Returns:
+            A 4-tuple containing:
+            - final_text (str): The AI's final response text.
+            - session_id (int): The chat session ID (new or existing).
+            - portal_errors (list[str]): List of institution slugs that had tool failures.
+            - geometry (dict | None): Optional map geometry data from katastar tools,
+                                      format: { polygon: [[lat,lon],...], centroid: [lat,lon] }
+        """
         assert self._mcp_session is not None, "ChatService.start() was not called"
 
         provider = settings.LLM_PROVIDER.lower()
