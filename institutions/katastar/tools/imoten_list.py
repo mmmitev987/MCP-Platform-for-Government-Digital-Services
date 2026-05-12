@@ -68,7 +68,12 @@ _HEADERS = {
 
 def _public_get(url: str, **kwargs) -> requests.Response:
     """Plain GET — no session cookies required."""
-    return requests.get(url, headers=_HEADERS, timeout=20, **kwargs)
+    try:
+        response = requests.get(url, headers=_HEADERS, timeout=20, **kwargs)
+        response.raise_for_status()
+        return response
+    except requests.RequestException as e:
+        raise RuntimeError(f"Public GET failed for {url}: {e}") from e
 
 
 def _gk_to_wgs84(x: float, y: float) -> tuple[float, float]:
