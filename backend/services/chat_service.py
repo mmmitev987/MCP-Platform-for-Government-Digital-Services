@@ -456,10 +456,10 @@ class ChatService:
                     timeout=settings.RESPONSE_TIMEOUT - 1,
                 )
             except RateLimitError:
-                return "Rate limit reached. Please wait a few seconds and try again.", []
+                return "Rate limit reached. Please wait a few seconds and try again.", [], geometry
             except APIStatusError as e:
                 if e.status_code == 503:
-                    return "The AI model is currently experiencing high demand. Please try again in a moment.", []
+                    return "The AI model is currently experiencing high demand. Please try again in a moment.", [], geometry
                 raise
 
             choice = response.choices[0]
