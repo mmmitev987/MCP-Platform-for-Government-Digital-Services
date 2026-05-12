@@ -37,7 +37,6 @@ Typical agent flow (no login required for public tools):
     katastar__login → katastar__check_property_favorited(591908)
 """
 
-import math
 import re
 import requests
 from pyproj import Transformer as _Transformer
