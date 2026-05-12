@@ -110,7 +110,10 @@ def scrape_listing(url: str, section_slug: str) -> list[dict]:
 
     snapshot = None
     for tag in soup.find_all(attrs={"wire:snapshot": True}):
-        data = json.loads(unescape(tag["wire:snapshot"]))
+        try:
+            data = json.loads(unescape(tag["wire:snapshot"]))
+        except json.JSONDecodeError:
+            continue
         if data.get("memo", {}).get("name") == "public.subcategory":
             snapshot = data
             break
