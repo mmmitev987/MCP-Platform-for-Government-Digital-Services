@@ -52,6 +52,7 @@ from institutions.katastar.client.http_client import (
     SessionExpiredError,
 )
 from institutions.katastar.config import PORTAL_BASE_URL
+from institutions.shared.errors import tool_error
 
 _HEADERS = {
     "User-Agent": (
@@ -127,11 +128,8 @@ def _parse_polygon_wgs84(wkt: str) -> dict | None:
 
 def _err(e: Exception) -> dict:
     if isinstance(e, SessionExpiredError):
-        return {
-            "error": str(e),
-            "action": "Call katastar__login to authenticate first.",
-        }
-    return {"error": str(e)}
+        return tool_error("auth_required", "Call katastar__login to authenticate first.")
+    return tool_error("unexpected_error", str(e))
 
 
 def search_municipality(search_string: str) -> dict:
@@ -150,7 +148,7 @@ def search_municipality(search_string: str) -> dict:
         ).json()
 
         if not results:
-            return {"error": f"No municipality found for '{search_string}'."}
+            return tool_error("not_found", f"No municipality found for '{search_string}'.")
         return results[0]
 
     except Exception as e:
@@ -373,13 +371,14 @@ def search_property(
             "totalParcelArea":     float | None,
             "documentType":        str | None,
             "certificate_price":   { amount, currency, product_name } | None,
+            "geometry":            { polygon: [[lat,lon],...], centroid: [lat,lon] } | None,
         }
-        On error: { "error": str }
+        On error: { "error": True, "code": str, "message": str }
     """
     if not property_certificate and not parcel_number:
-        return {"error": "Provide either property_certificate or parcel_number."}
+        return tool_error("invalid_input", "Provide either property_certificate or parcel_number.")
     if property_certificate and parcel_number:
-        return {"error": "Provide only one of property_certificate or parcel_number, not both."}
+        return tool_error("invalid_input", "Provide only one of property_certificate or parcel_number, not both.")
 
     try:
         # ── Step 1: resolve municipality name → IDs ───────────────────────────
@@ -389,7 +388,7 @@ def search_property(
         ).json()
 
         if not mun_results:
-            return {"error": f"Municipality '{municipality_name}' not found."}
+            return tool_error("not_found", f"Municipality '{municipality_name}' not found.")
 
         mun = mun_results[0]
         dept_id = mun["departmentID"]
@@ -405,12 +404,10 @@ def search_property(
             ).json()
 
             if not parcel_resp or "id" not in parcel_resp:
-                return {
-                    "error": (
-                        f"Parcel '{parcel_number}' not found in "
-                        f"municipality '{municipality_name}'."
-                    )
-                }
+                return tool_error(
+                    "not_found",
+                    f"Parcel '{parcel_number}' not found in municipality '{municipality_name}'."
+                )
 
             parcel_id = parcel_resp["id"]
 
@@ -422,11 +419,10 @@ def search_property(
             ).json()
 
             if not cert_resp or "propertyCertificate" not in cert_resp:
-                return {
-                    "error": (
-                        f"Could not find имотен лист for parcel '{parcel_number}'."
-                    )
-                }
+                return tool_error(
+                    "not_found",
+                    f"Could not find имотен лист for parcel '{parcel_number}'."
+                )
 
             property_certificate = cert_resp["propertyCertificate"]
 

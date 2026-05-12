@@ -578,9 +578,9 @@ class ChatService:
             except Exception as e:
                 err = str(e).lower()
                 if "quota" in err or "rate" in err or "429" in err:
-                    return "Rate limit reached. Please wait a few seconds and try again.", []
+                    return "Rate limit reached. Please wait a few seconds and try again.", [], geometry
                 if "503" in err or "unavailable" in err:
-                    return "The AI model is currently experiencing high demand. Please try again in a moment.", []
+                    return "The AI model is currently experiencing high demand. Please try again in a moment.", [], geometry
                 raise
 
             candidate = response.candidates[0]
@@ -680,7 +680,7 @@ class ChatService:
         db: Session,
         session_id: int | None = None,
         disabled_institutions: set[str] | None = None,
-    ) -> tuple[str, int, list[str]]:
+    ) -> tuple[str, int, list[str], dict | None]:
         assert self._mcp_session is not None, "ChatService.start() was not called"
 
         provider = settings.LLM_PROVIDER.lower()
