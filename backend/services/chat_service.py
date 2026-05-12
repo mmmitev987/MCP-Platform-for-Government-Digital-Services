@@ -481,7 +481,11 @@ class ChatService:
             history.append(assistant_dict)
 
             if not assistant_msg.tool_calls:
-                return assistant_msg.content or "", portal_errors, geometry
+                raw = assistant_msg.content or ""
+                text = raw if isinstance(raw, str) else (
+                    " ".join(b.text for b in raw if hasattr(b, "text")) if isinstance(raw, list) else str(raw)
+                )
+                return text, portal_errors, geometry
 
             # Execute tool calls
             for tc in assistant_msg.tool_calls:
