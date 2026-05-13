@@ -586,6 +586,10 @@ class ChatService:
             candidate = response.candidates[0]
             content = candidate.content  # genai_types.Content (role="model")
 
+            if not content or not content.parts:
+                finish = getattr(candidate, "finish_reason", None)
+                return f"The assistant could not generate a response (reason: {finish}).", portal_errors
+
             # Append model's full response (may include function_call parts)
             history.append(content)
 

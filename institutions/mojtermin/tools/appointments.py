@@ -10,7 +10,7 @@ Available tools:
   • get_location_by_name(name)                       — find a location by name
   • get_specialties()                                — list medical specialties
   • get_doctors()                                    — all doctors across all locations
-  • get_doctors_by_city(city_name)                   — doctors filtered by city
+  • get_doctors(city, specialty)                     — doctors filtered by city and/or specialty
   • get_available_appointments_by_name(city,         — free slots for a specific
       doctor_name, date)                               doctor on a given date
 """
@@ -112,16 +112,18 @@ def _flat() -> list:
 
 def is_doctor(name: str) -> bool:
     """
-    Heuristic: a resource is a doctor if its name is 2-3 all-uppercase words.
-    Filters out rooms, equipment, and other non-person resources in the nav tree.
+    Heuristic: a resource is a doctor if its name is 2-3 all-uppercase words,
+    optionally followed by a specialty suffix after a dash.
 
     Examples:
-        "ЛИЛЈАНА СПАСЕВСКА"  → True   (2 uppercase words)
-        "ИВАН ПЕТРОВ ПОПОВ"  → True   (3 uppercase words)
-        "Ординација 1"       → False  (mixed case)
-        "МРИ"                → False  (1 word)
+        "ЛИЛЈАНА СПАСЕВСКА"              → True
+        "ИВАН ПЕТРОВ ПОПОВ"              → True
+        "НИКОЛИНА ЗДРАВЕСКА - НЕОНАТОЛОГ"→ True  (suffix stripped)
+        "Ординација 1"                   → False (mixed case)
+        "МРИ"                            → False (1 word)
     """
-    words = name.strip().split()
+    base = re.split(r"\s*-\s*", name)[0].strip()
+    words = base.split()
     return 2 <= len(words) <= 3 and all(word.isupper() for word in words)
 
 
@@ -197,102 +199,109 @@ def get_specialties() -> list | dict:
         return tool_error("network_error", str(e))
 
 
-def get_doctors() -> list | dict:
+def get_doctors(city: str | None = None, specialty: str | None = None) -> list | dict:
     """
-    Return a sorted, deduplicated list of all doctor names across the entire portal.
+    Return doctors, optionally filtered by city and/or specialty.
 
-    Identifies doctors using the is_doctor() heuristic: resource nodes whose
-    names are 2-3 fully uppercase words.
-    """
-    try:
-        return sorted({
-            n["name"] for n in _flat()
-            if n.get("type") == "resource" and is_doctor(n["name"])
-        })
-    except MojTerminError as e:
-        return tool_error("network_error", str(e))
-
-
-def get_doctors_by_city(city_name: str) -> list | dict:
-    """
-    Return all doctors in a given city, along with their clinic name.
+    All combinations are supported:
+      get_doctors()                              → all doctors portal-wide
+      get_doctors(city="СКОПЈЕ")                → all doctors in Skopje
+      get_doctors(specialty="Кардиологија")     → all cardiologists countrywide
+      get_doctors(city="СКОПЈЕ",
+                  specialty="Кардиологија")     → cardiologists in Skopje
 
     Args:
-        city_name: City to filter by, e.g. "СТРУГА". Case-insensitive,
-                   supports Latin input (e.g. "Struga" → "Струга").
+        city:      City name, case-insensitive, Latin input supported
+                   (e.g. "Skopje" → "Скопје"). Optional.
+        specialty: Medical specialty name, case-insensitive, Latin input
+                   supported (e.g. "Kardiologija" → "Кардиологија"). Optional.
 
     Returns:
-        List of dicts, each with keys: "doctor", "clinic", "city".
-        Sorted alphabetically by doctor name.
+        Sorted list of dicts with keys: "doctor", "specialty", "clinic", "city".
+        On error: { "error": true, "code": str, "message": str }
     """
     try:
-        flat = _flat()
+        nav = _nav()
     except MojTerminError as e:
         return tool_error("network_error", str(e))
-    pattern = _pat(city_name)
+
+    city_pat = _pat(city) if city else None
+    spec_pat = _pat(specialty) if specialty else None
+
     results = []
-    for node in flat:
-        if node.get("type") != "location" or not pattern.search(normalize(node["name"])):
-            continue
-        for clinic in node.get("subsections", []):
-            for r in clinic.get("subsections", []):
-                if is_doctor(r["name"]):
-                    results.append({
-                        "doctor": r["name"],
-                        "clinic": clinic["name"],
-                        "city": node["name"],
-                    })
+    seen = set()
+
+    for root in nav:
+        for spec_node in root.get("subsections", []):
+            if spec_node.get("type") != "specialty":
+                continue
+            if spec_pat and not spec_pat.search(normalize(spec_node["name"])):
+                continue
+            for loc_node in spec_node.get("subsections", []):
+                if loc_node.get("type") != "location":
+                    continue
+                if city_pat and not city_pat.search(normalize(loc_node["name"])):
+                    continue
+                for clinic_node in loc_node.get("subsections", []):
+                    for resource in clinic_node.get("subsections", []):
+                        if not is_doctor(resource["name"]):
+                            continue
+                        key = (resource["name"], spec_node["name"], clinic_node["name"])
+                        if key in seen:
+                            continue
+                        seen.add(key)
+                        results.append({
+                            "doctor": resource["name"],
+                            "specialty": spec_node["name"],
+                            "clinic": clinic_node["name"],
+                            "city": loc_node["name"],
+                        })
+
     results.sort(key=lambda x: x["doctor"])
     return results
 
 
-def get_available_appointments_by_name(city: str, doctor_name: str, date: str) -> dict | str:
+def get_available_appointments_by_name(doctor_name: str) -> dict | str:
     """
-    Return available appointment slots for a specific doctor on a given date.
+    Return all available appointment slots for a specific doctor, grouped by date.
 
     Args:
-        city:        City name to narrow the search, e.g. "СТРУГА".
         doctor_name: Full or partial doctor name, e.g. "ЛИЛЈАНА СПАСЕВСКА".
-        date:        Date in YYYY-MM-DD format, e.g. "2026-04-11".
 
     Returns:
-        Dict with keys "doctor", "date", "available_slots" (list of "HH:MM" strings),
-        or an error dict on failure.
+        Dict with keys "doctor" and "slots_by_date" (dict mapping each date that
+        has availability to a list of "HH:MM" strings), or an error dict on failure.
     """
     try:
         flat = _flat()
     except MojTerminError as e:
         return tool_error("network_error", str(e))
-    city_pat = _pat(city)
+
     doc_pat = _pat(doctor_name)
-    doctor_id = None
-    found_doctor = None
-    for node in flat:
-        if node.get("type") != "location" or not city_pat.search(normalize(node["name"])):
-            continue
-        for clinic in node.get("subsections", []):
-            for resource in clinic.get("subsections", []):
-                if is_doctor(resource["name"]) and doc_pat.search(normalize(resource["name"])):
-                    doctor_id = resource.get("id")
-                    found_doctor = resource["name"]
-                    break
-            if doctor_id:
-                break
-        if doctor_id:
-            break
-    if not doctor_id:
+    resource = next(
+        (n for n in flat
+         if n.get("type") == "resource"
+         and is_doctor(n["name"])
+         and doc_pat.search(normalize(n["name"]))),
+        None,
+    )
+
+    if not resource:
         return tool_error(
             "not_found",
-            f"No doctor matching '{doctor_name}' was found in '{city}'. "
-            "Try calling get_doctors_by_city() to see available doctors.",
+            f"No doctor matching '{doctor_name}' was found. "
+            "Try calling get_doctors() to see available doctors.",
         )
     try:
-        slots_data = _get(f"/api/pp/resources/{doctor_id}/slots_availability")
+        slots_data = _get(f"/api/pp/resources/{resource['id']}/slots_availability")
     except MojTerminError as e:
         return tool_error("network_error", str(e))
-    available = [s["time"] for s in _parse_slots(slots_data) if s["date"] == date]
+
+    slots_by_date: dict[str, list[str]] = {}
+    for s in _parse_slots(slots_data):
+        slots_by_date.setdefault(s["date"], []).append(s["time"])
+
     return {
-        "doctor": found_doctor,
-        "date": date,
-        "available_slots": available,
+        "doctor": resource["name"],
+        "slots_by_date": slots_by_date,
     }

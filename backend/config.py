@@ -5,7 +5,7 @@ from pathlib import Path
 class Settings(BaseSettings):
     # ── LLM Provider ──────────────────────────────────────────────────────────
     # Set to "openai" to use GPT, or "gemini" to use Google Gemini.
-    LLM_PROVIDER: str = "openai"
+    LLM_PROVIDER: str = "gemini"
 
     # ── OpenAI (used when LLM_PROVIDER=openai) ────────────────────────────────
     OPENAI_API_KEY: str = ""
