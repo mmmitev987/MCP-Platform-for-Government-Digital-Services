@@ -126,23 +126,22 @@ institutions:
       - "Never ask the user for internal IDs such as cv_id or oglas_id; use IDs from previous tool results."
 
   - slug: mon
-    name: "e-uslugi.mon.gov.mk"
+    name: "mon.gov.mk"
     command: python
     args:
       - "-m"
       - "institutions.mon.main"
     description: >
-      Ministry of Education and Science: browse active services and contests,
-      find out what documents are needed to apply, and look up requirements
-      for official education documents (enrollment certificates, diplomas,
-      diploma recognition, transcripts).
+      Ministry of Education and Science (МОН): browse all public competitions
+      (Конкурси) and scholarships (Стипендии) published on mon.gov.mk,
+      including full details and attached documents. No login required.
     tool_rules:
-      - "Call check_session_mon first to see if the user is already logged in."
-      - "Call login_mon only if check_session_mon says the session is inactive."
-      - "Call list_mon_services to find the service the user is asking about."
-      - "Call get_mon_service_requirements only when the user needs to know what documents to upload."
-      - "For document questions (certificates, transcripts, diplomas), use list_mon_document_types and get_mon_document_requirements — these do NOT require login."
-      - "Never call list_mon_services and get_mon_service_requirements in the same turn unless you already have the specific service ID."
+      - "Call list_mon_competitions to get all active competitions from mon.gov.mk."
+      - "Call list_mon_scholarships to get all active scholarships from mon.gov.mk."
+      - "Call get_mon_competition_details(url) only after the user selects a specific competition from list_mon_competitions results."
+      - "Call get_mon_scholarship_details(url) only after the user selects a specific scholarship from list_mon_scholarships results."
+      - "Never call a detail tool without first having a URL from the corresponding list tool."
+      - "All MON tools are public — no login is required."
 
   - slug: katastar
     name: "e-uslugi.katastar.gov.mk"
@@ -151,17 +150,16 @@ institutions:
       - "-m"
       - "institutions.katastar.main"
     description: >
-      Cadastre (real estate registry) services: authentication, municipality search,
+      Cadastre (real estate registry) services: municipality search,
       parcel lookup, property certificates (имотен лист), building records,
-      parcel geometry, total parcel area, and favorites management.
-      tool_rules:
-      - "Always call login first if the user is not authenticated."
-      - "Call search_municipality to get departmentID and municipalityID before any property query."
-      - "Call find_parcels to list parcels for a given имотен лист number."
-      - "Call find_buildings to list buildings for a given имотен лист number."
-      - "Call get_total_parcel_area to get the total area and document type for a имотен лист."
-      - "Call check_property_favorited only when the user asks about saved/favorite properties."
-      - "Call check_session before authenticated requests to verify session is active."
+      total parcel area. Most tools are public — no login required.
+      Login is only needed for favorites management.
+    tool_rules:
+      - "Use search_property as the primary search tool — it accepts municipality name + either имотен лист number or парцела number and returns everything in one call."
+      - "Call search_property with property_certificate when the user provides an имотен лист number."
+      - "Call search_property with parcel_number when the user provides a парцела number (e.g. '18421/1')."
+      - "Never call search_municipality + find_parcels + find_buildings separately when search_property can do it all."
+      - "Login is only needed for check_property_favorited — call check_session first, then login if needed."
       - "Call logout only when the user explicitly asks to log out."
       - "Translate queries: 'property'→'имот', 'parcel'→'парцела', 'municipality'→'општина', 'building'→'зграда', 'certificate'→'имотен лист'."
 

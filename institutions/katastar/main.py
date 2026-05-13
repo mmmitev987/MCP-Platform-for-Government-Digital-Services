@@ -35,9 +35,9 @@ from institutions.katastar.tools.imoten_list import (
     get_cadastre_municipality as _get_cadastre_municipality,
     find_parcels              as _find_parcels,
     check_property_favorited  as _check_property_favorited,
-    find_buildings             as _find_buildings,
-    get_total_parcel_area  as _get_total_parcel_area,
-
+    find_buildings            as _find_buildings,
+    get_total_parcel_area     as _get_total_parcel_area,
+    search_property           as _search_property,
 )
 
 # ── Create the FastMCP server instance ────────────────────────────────────────
@@ -211,6 +211,47 @@ def get_total_parcel_area(
     return _get_total_parcel_area(
         department_id, municipality_id, property_certificate
     )
+
+@mcp.tool()
+def search_property(
+    municipality_name: str,
+    property_certificate: str | None = None,
+    parcel_number: str | None = None,
+) -> dict:
+    """
+    Search for property data by катастарска општина + имотен лист OR парцела number.
+
+    No login required. This is the main combined search — use this instead of
+    calling search_municipality + find_parcels + find_buildings separately.
+
+    Provide exactly ONE of property_certificate or parcel_number:
+
+      • municipality_name + property_certificate
+            Returns all parcels and buildings for that имотен лист.
+            Example: municipality_name="КУМАНОВО", property_certificate="14"
+
+      • municipality_name + parcel_number
+            Finds which имотен лист contains that парцела and returns its data.
+            Example: municipality_name="КУМАНОВО", parcel_number="18421/1"
+
+    Args:
+        municipality_name:    Cadastral municipality, e.g. "КУМАНОВО", "ЦЕНТАР".
+        property_certificate: Имотен лист number, e.g. "14".
+        parcel_number:        Parcel number, e.g. "18421/1".
+
+    Returns:
+        {
+            municipality, property_certificate,
+            parcels: list, buildings: list,
+            totalParcelArea, documentType
+        }
+    """
+    return _search_property(
+        municipality_name=municipality_name,
+        property_certificate=property_certificate,
+        parcel_number=parcel_number,
+    )
+
 
 # ── Entry point ───────────────────────────────────────────────────────────────
 

@@ -14,6 +14,11 @@ class ChatResponse(BaseModel):
     # Slugs of portals that returned a structured error during this response
     # (e.g. ["uslugi", "crm"]).  Empty list = everything worked fine.
     portal_errors: list[str] = []
+    # Katastar parcel geometry for mini-map rendering in the frontend.
+    # Present only when a katastar__search_property tool was called and
+    # returned valid geometry.
+    # Shape: { "centroid": [lat, lon], "polygon": [[lat, lon], ...] }
+    geometry: dict | None = None
 
 
 class MessageOut(BaseModel):

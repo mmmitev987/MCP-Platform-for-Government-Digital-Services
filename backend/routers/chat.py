@@ -20,7 +20,7 @@ async def send_message(
 ):
     try:
         disabled = {s.strip() for s in (current_user.disabled_institutions or "").split(",") if s.strip()}
-        reply, session_id, portal_errors = await chat_service.chat(
+        reply, session_id, portal_errors, geometry = await chat_service.chat(
             user_id=current_user.id,
             message=body.message,
             db=db,
@@ -38,6 +38,7 @@ async def send_message(
         session_id=session_id,
         created_at=datetime.now(timezone.utc),
         portal_errors=portal_errors,
+        geometry=geometry,
     )
 
 
