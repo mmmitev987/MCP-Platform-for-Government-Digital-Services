@@ -13,6 +13,25 @@ body {
   color: #1e293b;
 }
 
+/* ── Leaflet tile fix ── Tailwind Preflight sets max-width:100%/height:auto on
+   all <img> elements, which shrinks Leaflet's 256×256 tiles and breaks the map.
+   These rules must come AFTER @tailwind base to win the specificity battle.   ── */
+.leaflet-container img {
+  max-width: none !important;
+  max-height: none !important;
+  height: auto !important;
+  width: auto !important;
+  display: inline !important;
+  border-style: none !important;
+}
+/* Tiles specifically */
+.leaflet-tile-container img,
+img.leaflet-tile {
+  max-width: none !important;
+  width: 256px !important;
+  height: 256px !important;
+}
+
 @keyframes typingBounce {
   0%, 60%, 100% { transform: translateY(0); opacity: 0.5; }
   30%            { transform: translateY(-6px); opacity: 1; }

@@ -170,7 +170,9 @@ export default function Activity() {
                         try {
                           const parsed = JSON.parse(raw);
                           if (parsed.doctor) return `Д-р ${parsed.doctor}${parsed.clinic ? `, ${parsed.clinic}` : ""}`;
-                          return parsed.name || parsed.title || Object.values(parsed)[0] || "—";
+                          if (parsed.municipality?.name) return parsed.municipality.name;
+                          const first = parsed.name || parsed.title || Object.values(parsed)[0];
+                          return typeof first === "string" ? first : "—";
                         } catch {
                           const m = raw.match(/"name"\s*:\s*"([^"]+)"/);
                           if (m) return m[1];

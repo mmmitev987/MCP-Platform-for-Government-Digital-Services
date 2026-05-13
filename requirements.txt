@@ -11,6 +11,7 @@ playwright
 
 # ── HTTP client (tool requests and http-based auth fallback) ─────────────────
 requests
+pyproj          # EPSG:6316 → WGS84 coordinate transform for katastar parcel maps
 
 # ── LLM SDKs ─────────────────────────────────────────────────────────────────
 # Install both so any team member can switch provider via LLM_PROVIDER in .env

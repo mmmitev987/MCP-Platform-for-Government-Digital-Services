@@ -5,6 +5,7 @@ import { useChat } from "../hooks/useChat";
 import MessageBubble from "../components/chat/MessageBubble";
 import ChatInput from "../components/chat/ChatInput";
 import SuggestedQuestions from "../components/chat/SuggestedQuestions";
+import KatastarMap from "../components/chat/KatastarMap";
 
 export default function Assistant() {
   const { t } = useTranslation();
@@ -90,7 +91,14 @@ export default function Assistant() {
         ) : (
           <div className="max-w-3xl mx-auto">
             {messages.map((m, i) => (
-              <MessageBubble key={i} role={m.role} content={m.content} portalErrors={m.portalErrors} />
+              <div key={i}>
+                <MessageBubble role={m.role} content={m.content} portalErrors={m.portalErrors} />
+                {m.role === "assistant" && m.geometry && (
+                  <div className="max-w-xl ml-10 mb-4">
+                    <KatastarMap geometry={m.geometry} />
+                  </div>
+                )}
+              </div>
             ))}
             {loading && (
               <div className="flex justify-start mb-4" style={{ animation: "fadeSlideIn 0.25s ease-out" }}>

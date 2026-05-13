@@ -150,17 +150,16 @@ institutions:
       - "-m"
       - "institutions.katastar.main"
     description: >
-      Cadastre (real estate registry) services: authentication, municipality search,
+      Cadastre (real estate registry) services: municipality search,
       parcel lookup, property certificates (имотен лист), building records,
-      parcel geometry, total parcel area, and favorites management.
-      tool_rules:
-      - "Always call login first if the user is not authenticated."
-      - "Call search_municipality to get departmentID and municipalityID before any property query."
-      - "Call find_parcels to list parcels for a given имотен лист number."
-      - "Call find_buildings to list buildings for a given имотен лист number."
-      - "Call get_total_parcel_area to get the total area and document type for a имотен лист."
-      - "Call check_property_favorited only when the user asks about saved/favorite properties."
-      - "Call check_session before authenticated requests to verify session is active."
+      total parcel area. Most tools are public — no login required.
+      Login is only needed for favorites management.
+    tool_rules:
+      - "Use search_property as the primary search tool — it accepts municipality name + either имотен лист number or парцела number and returns everything in one call."
+      - "Call search_property with property_certificate when the user provides an имотен лист number."
+      - "Call search_property with parcel_number when the user provides a парцела number (e.g. '18421/1')."
+      - "Never call search_municipality + find_parcels + find_buildings separately when search_property can do it all."
+      - "Login is only needed for check_property_favorited — call check_session first, then login if needed."
       - "Call logout only when the user explicitly asks to log out."
       - "Translate queries: 'property'→'имот', 'parcel'→'парцела', 'municipality'→'општина', 'building'→'зграда', 'certificate'→'имотен лист'."
 

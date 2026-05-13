@@ -89,6 +89,14 @@ export default function MessageBubble({ role, content, portalErrors = [] }) {
   const hasPortalError = !isUser && portalErrors.length > 0;
   const portalNames = portalErrors.map((s) => PORTAL_NAMES[s] || s);
 
+  // Guard: content must always be a string for ReactMarkdown / plain render
+  const safeContent =
+    typeof content === "string"
+      ? content
+      : content == null
+      ? ""
+      : JSON.stringify(content, null, 2);
+
   return (
     <div className={`flex ${isUser ? "justify-end" : "justify-start"} mb-4`}
       style={{ animation: "fadeSlideIn 0.25s ease-out" }}>
@@ -116,10 +124,10 @@ export default function MessageBubble({ role, content, portalErrors = [] }) {
           }}
         >
           {isUser ? (
-            content
+            safeContent
           ) : (
             <ReactMarkdown components={markdownComponents}>
-              {content}
+              {safeContent}
             </ReactMarkdown>
           )}
         </div>

@@ -437,8 +437,9 @@ class ChatService:
         openai_tools: list[dict],
         user_id: int,
         db,
-    ) -> tuple[str, list[str]]:
+    ) -> tuple[str, list[str], dict | None]:
         portal_errors: list[str] = []
+        geometry: dict | None = None
 
         while True:
             messages_to_send = [{"role": "system", "content": self._system_prompt}] + history
@@ -455,10 +456,10 @@ class ChatService:
                     timeout=settings.RESPONSE_TIMEOUT - 1,
                 )
             except RateLimitError:
-                return "Rate limit reached. Please wait a few seconds and try again.", []
+                return "Rate limit reached. Please wait a few seconds and try again.", [], geometry
             except APIStatusError as e:
                 if e.status_code == 503:
-                    return "The AI model is currently experiencing high demand. Please try again in a moment.", []
+                    return "The AI model is currently experiencing high demand. Please try again in a moment.", [], geometry
                 raise
 
             choice = response.choices[0]
@@ -480,7 +481,11 @@ class ChatService:
             history.append(assistant_dict)
 
             if not assistant_msg.tool_calls:
-                return assistant_msg.content or "", portal_errors
+                raw = assistant_msg.content or ""
+                text = raw if isinstance(raw, str) else (
+                    " ".join(b.text for b in raw if hasattr(b, "text")) if isinstance(raw, list) else str(raw)
+                )
+                return text, portal_errors, geometry
 
             # Execute tool calls
             for tc in assistant_msg.tool_calls:
@@ -508,6 +513,14 @@ class ChatService:
                             service = tool_name.split("__")[0] if "__" in tool_name else None
                             if service and service not in portal_errors:
                                 portal_errors.append(service)
+                        # Capture katastar geometry for mini-map
+                        if (
+                            not is_error
+                            and tool_name == "katastar__search_property"
+                            and isinstance(parsed, dict)
+                            and parsed.get("geometry")
+                        ):
+                            geometry = parsed["geometry"]
                     except (json.JSONDecodeError, TypeError):
                         tool_status = "completed"
                 except Exception as exc:
@@ -541,8 +554,9 @@ class ChatService:
         gemini_tools: list,
         user_id: int,
         db,
-    ) -> tuple[str, list[str]]:
+    ) -> tuple[str, list[str], dict | None]:
         portal_errors: list[str] = []
+        geometry: dict | None = None
 
         while True:
             try:
@@ -564,9 +578,9 @@ class ChatService:
             except Exception as e:
                 err = str(e).lower()
                 if "quota" in err or "rate" in err or "429" in err:
-                    return "Rate limit reached. Please wait a few seconds and try again.", []
+                    return "Rate limit reached. Please wait a few seconds and try again.", [], geometry
                 if "503" in err or "unavailable" in err:
-                    return "The AI model is currently experiencing high demand. Please try again in a moment.", []
+                    return "The AI model is currently experiencing high demand. Please try again in a moment.", [], geometry
                 raise
 
             candidate = response.candidates[0]
@@ -587,7 +601,7 @@ class ChatService:
                 final_text = " ".join(
                     part.text for part in content.parts if part.text
                 )
-                return final_text, portal_errors
+                return final_text, portal_errors, geometry
 
             # Execute all tool calls, collect results
             tool_result_parts = []
@@ -613,6 +627,14 @@ class ChatService:
                             service = tool_name.split("__")[0] if "__" in tool_name else None
                             if service and service not in portal_errors:
                                 portal_errors.append(service)
+                        # Capture katastar geometry for mini-map
+                        if (
+                            not is_error
+                            and tool_name == "katastar__search_property"
+                            and isinstance(parsed, dict)
+                            and parsed.get("geometry")
+                        ):
+                            geometry = parsed["geometry"]
                     except (json.JSONDecodeError, TypeError):
                         tool_status = "completed"
                 except Exception as exc:
@@ -658,7 +680,25 @@ class ChatService:
         db: Session,
         session_id: int | None = None,
         disabled_institutions: set[str] | None = None,
-    ) -> tuple[str, int, list[str]]:
+    ) -> tuple[str, int, list[str], dict | None]:
+        """
+        Process a user message through the AI agent and return the response.
+
+        Args:
+            user_id: Database ID of the user sending the message.
+            message: The user's message text.
+            db: SQLAlchemy database session.
+            session_id: Optional existing chat session ID to continue.
+            disabled_institutions: Optional set of institution slugs to exclude from tools.
+
+        Returns:
+            A 4-tuple containing:
+            - final_text (str): The AI's final response text.
+            - session_id (int): The chat session ID (new or existing).
+            - portal_errors (list[str]): List of institution slugs that had tool failures.
+            - geometry (dict | None): Optional map geometry data from katastar tools,
+                                      format: { polygon: [[lat,lon],...], centroid: [lat,lon] }
+        """
         assert self._mcp_session is not None, "ChatService.start() was not called"
 
         provider = settings.LLM_PROVIDER.lower()
@@ -686,6 +726,7 @@ class ChatService:
 
         final_text = ""
         portal_errors: list[str] = []
+        geometry: dict | None = None
 
         async with self._get_lock(user_id):
             if provider == "gemini":
@@ -699,7 +740,7 @@ class ChatService:
                 )
                 try:
                     async with self._ai_semaphore:
-                        final_text, portal_errors = await asyncio.wait_for(
+                        final_text, portal_errors, geometry = await asyncio.wait_for(
                             self._agentic_loop_gemini(history, gemini_tools, user_id, db),
                             timeout=settings.RESPONSE_TIMEOUT,
                         )
@@ -714,7 +755,7 @@ class ChatService:
                 history.append({"role": "user", "content": message})
                 try:
                     async with self._ai_semaphore:
-                        final_text, portal_errors = await asyncio.wait_for(
+                        final_text, portal_errors, geometry = await asyncio.wait_for(
                             self._agentic_loop_openai(history, openai_tools, user_id, db),
                             timeout=settings.RESPONSE_TIMEOUT,
                         )
@@ -771,7 +812,7 @@ class ChatService:
             except Exception:
                 pass
 
-        return final_text, chat_session.id, portal_errors
+        return final_text, chat_session.id, portal_errors, geometry
 
 
 # Module-level singleton imported by routers

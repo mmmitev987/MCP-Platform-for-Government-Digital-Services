@@ -36,7 +36,7 @@ export function useChat() {
       setError(null);
       setMessages((prev) => [...prev, { role: "user", content: text }]);
       try {
-        const { reply, session_id, portal_errors } = await sendMessage(text, sessionId);
+        const { reply, session_id, portal_errors, geometry } = await sendMessage(text, sessionId);
         if (!sessionId) window.dispatchEvent(new Event("chat:session-created"));
         setSessionId(session_id);
         setMessages((prev) => [
@@ -46,6 +46,8 @@ export function useChat() {
             content: reply,
             // portal_errors: e.g. ["uslugi", "crm"] — portals that failed
             portalErrors: portal_errors ?? [],
+            // katastar parcel geometry for mini-map (null if not a katastar response)
+            geometry: geometry ?? null,
           },
         ]);
       } catch (err) {
