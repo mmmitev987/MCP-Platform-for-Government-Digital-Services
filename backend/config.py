@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     SMTP_APP_PASSWORD: str = ""
     FRONTEND_URL: str = "http://localhost:3000"
     PRODUCTION: bool = False  # Set to True in production to enforce HTTPS
-    RESPONSE_TIMEOUT: int = 9  # Max seconds to wait for a full chat response
+    RESPONSE_TIMEOUT: int = 120  # Max seconds to wait for a full chat response (Selenium tools need ~60s)
 
     class Config:
         env_file = ".env"

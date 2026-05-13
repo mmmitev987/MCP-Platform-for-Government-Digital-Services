@@ -10,6 +10,11 @@ from institutions.agencijaZaVrabotuvanje.tools.public_tools import (
     view_jobs as _view_jobs,
     search_jobs as _search_jobs,
     get_job_details as _get_job_details,
+    find_job_details as _find_job_details,
+)
+
+from institutions.agencijaZaVrabotuvanje.tools.forms import (
+    get_form as _get_form,
 )
 
 from institutions.agencijaZaVrabotuvanje.tools.authenticated_tools import (
@@ -92,6 +97,62 @@ def get_job_details(oglas_id: str) -> dict:
     Requires oglas_id (internal job identifier).
     """
     return _get_job_details(oglas_id=oglas_id)
+
+
+@mcp.tool()
+def find_job_details(query: str) -> dict:
+    """
+    Find full details for a job listing by company name or job title — no oglas_id needed.
+
+    Use this when the user asks for more information about a specific job they saw in a
+    previous listing (e.g. "кажи ми повеќе за огласот на Новелиц" or "детали за програмер
+    во Битола"). The query can be a company name, job title, or any combination.
+
+    Internally runs a live search across current listings and returns details for the
+    best-matching job. Works even when no prior search result is in context.
+
+    Args:
+        query: Company name, job title, or keyword (e.g. "Новелиц", "програмер Битола").
+
+    Returns:
+        Full job details dict (same structure as get_job_details) on success, or an
+        error dict with sample_available listing if no match is found.
+    """
+    return _find_job_details(query=query)
+
+
+@mcp.tool()
+def get_form(query: str) -> dict:
+    """
+    Return the download link for an official Employment Agency (av.gov.mk) form.
+
+    Call this tool when the user asks for a downloadable form, document, or
+    образец related to employment registration/deregistration, internships
+    (практиканти), job ads, or the ППП form. The query can be a partial name,
+    a keyword (e.g. "технолошки вишок", "практикант пријава", "ППП"), or the
+    exact Macedonian form title.
+
+    Uses fuzzy matching so typos and partial queries work. When no form matches,
+    returns a list of all 9 available forms so the user can choose.
+
+    Args:
+        query: Natural-language description or partial name of the desired form.
+
+    Returns:
+        On match:
+            {
+                "name": <full official form name>,
+                "url": <direct download URL>,
+                "file_type": <"pdf", "docx", or "doc">,
+                "message": "Here is the download link for the requested form."
+            }
+        On no match:
+            {
+                "message": "No matching form found. Here are all available forms:",
+                "available_forms": [<list of all 9 form names>]
+            }
+    """
+    return _get_form(query=query)
 
 
 # ─────────────────────────────────────────────

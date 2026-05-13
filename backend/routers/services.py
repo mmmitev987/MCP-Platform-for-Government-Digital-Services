@@ -43,6 +43,12 @@ INSTITUTIONS = [
         "description": "Портал за образовни услуги — пријавување документи, барања и услуги за ученици и студенти.",
         "url": "https://e-uslugi.mon.gov.mk",
     },
+    {
+        "slug": "agencijaZaVrabotuvanje",
+        "name": "Агенција за вработување",
+        "description": "Портал за пребарување огласи за работа, управување со CV и поднесување пријави — av.gov.mk.",
+        "url": "https://e-rabota.av.gov.mk",
+    },
 ]
 
 
