@@ -89,17 +89,23 @@ institutions:
       - "-m"
       - "institutions.crm.main"
     description: >
-      Central Registry of North Macedonia: search registered companies,
-      retrieve their full registration profile, founders, directors, and
-      annual financial reports.
+      Central Registry of North Macedonia (Централен регистар — ЦРРСМ, crm.com.mk):
+      search registered companies; retrieve registration profiles, founders,
+      directors, and annual reports; list all available ЦРРСМ services grouped
+      by category; and retrieve step-by-step procedures for any ЦРРСМ service
+      (company registration, name reservation, annual report submission, pledge
+      registration, beneficial owner entry, and more).
     tool_rules:
-      - "Always call search_companies first to obtain the leid (company ID)."
+      - "Use list_services when the user asks what services ЦРРСМ / crm.com.mk offers, or asks for a menu of available services."
+      - "Use get_service_procedure when the user asks HOW to do something on ЦРРСМ — registration steps, required actions, procedure instructions."
+      - "For company lookups: always call search_companies first to obtain the leid (company ID)."
       - "Then call exactly one detail tool based on what the user asked for:"
       - "  - get_company_details for general company info (address, status, legal form)."
       - "  - get_founders_and_directors if the user asks about people / ownership."
       - "  - get_annual_reports if the user asks about finances or annual filings."
       - "Never call more than one detail tool unless the user explicitly asked for both."
       - "Never call any detail tool without first getting the leid from search_companies."
+      - "NEVER use uslugi tools to answer questions about ЦРРСМ services — use list_services and get_service_procedure instead."
 
   - slug: agencijaZaVrabotuvanje
     name: "e-rabota.av.gov.mk"

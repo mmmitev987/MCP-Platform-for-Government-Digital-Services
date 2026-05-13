@@ -20,27 +20,36 @@ Standalone test:
     python -m institutions.crm.main
 """
 
+import asyncio
 from contextlib import asynccontextmanager
 
 from mcp.server.fastmcp import FastMCP
 
 from institutions.crm.client.browser import crm_browser
+from institutions.crm.tools.sitemap import (
+    build_services_cache,
+    list_services as _list_services,
+    get_service_procedure as _get_service_procedure,
+)
 
 
-# ── Lifespan: start and stop the persistent browser ───────────────────────────
+# ── Lifespan: start browser + build sitemap cache ────────────────────────────
 
 @asynccontextmanager
 async def lifespan(server: FastMCP):
     """
-    Start the Playwright browser when the MCP server starts,
-    and close it cleanly when the server shuts down.
-
-    This runs once per process — the browser is shared across all tool calls.
+    Start the Playwright browser and scrape the sitemap on server startup.
+    Both complete before the server starts serving requests.
     """
     await crm_browser.start()
+    # Run scrape in background so the MCP server becomes ready immediately.
+    # list_services / get_service_procedure return a "not yet loaded" message
+    # until the cache is populated (usually 3-5 minutes after startup).
+    scrape_task = asyncio.create_task(build_services_cache())
     try:
         yield
     finally:
+        scrape_task.cancel()
         await crm_browser.stop()
 
 
@@ -159,6 +168,49 @@ async def get_annual_reports(leid: int) -> list[dict]:
         On error: { "error": true, "code": str, "message": str }
     """
     return await crm_browser.get_annual_reports(leid)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# SITEMAP / SERVICE PROCEDURE TOOLS
+# Reads from in-memory cache built at startup — no live scraping per request.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@mcp.tool()
+async def list_services() -> dict:
+    """
+    Return all services available on the Central Registry of North Macedonia
+    (Централен регистар на Република Северна Македонија — ЦРРСМ, crm.com.mk),
+    grouped by category.
+
+    Call this when the user asks what they can do on the Central Registry
+    (Централниот регистар / ЦРРСМ), asks for a list or menu of available
+    services, or asks what procedures are available on crm.com.mk.
+    Returns service names only (not full procedures) to keep the response concise.
+
+    Do NOT call this for uslugi.gov.mk — it is specific to crm.com.mk.
+    """
+    return _list_services()
+
+
+@mcp.tool()
+async def get_service_procedure(query: str) -> dict:
+    """
+    Return the step-by-step procedure for a specific service on the Central
+    Registry of North Macedonia (ЦРРСМ, crm.com.mk).
+
+    Call this when the user asks how to do something on the Central Registry —
+    e.g. how to register a company, how to check a name reservation, how to
+    submit an annual report, how to register a pledge or leasing, how to enter
+    data about beneficial owners. The query can be a full service name or a
+    partial keyword. Fuzzy matching handles typos and partial inputs.
+
+    Do NOT call this for uslugi.gov.mk — it is specific to crm.com.mk.
+
+    Args:
+        query: Service name or keyword, e.g. "регистрација на субјект",
+               "резервација на ime", "годишна сметка електронски".
+    """
+    return _get_service_procedure(query=query)
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
