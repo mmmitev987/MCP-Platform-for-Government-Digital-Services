@@ -200,7 +200,7 @@ def _build_system_prompt(connected_slugs: list[str]) -> str:
     Only includes institutions that are actually connected (alive).
     """
     try:
-        with open(_GATEWAY_CONFIG_PATH) as f:
+        with open(_GATEWAY_CONFIG_PATH, encoding="utf-8") as f:
             config = yaml.safe_load(f)
     except Exception as exc:
         print(f"[ChatService] Warning: could not read gateway config: {exc}", file=sys.stderr)
@@ -585,6 +585,10 @@ class ChatService:
 
             candidate = response.candidates[0]
             content = candidate.content  # genai_types.Content (role="model")
+
+            if not content or not content.parts:
+                finish = getattr(candidate, "finish_reason", None)
+                return f"The assistant could not generate a response (reason: {finish}).", portal_errors
 
             # Append model's full response (may include function_call parts)
             history.append(content)
