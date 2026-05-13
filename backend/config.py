@@ -5,7 +5,7 @@ from pathlib import Path
 class Settings(BaseSettings):
     # ── LLM Provider ──────────────────────────────────────────────────────────
     # Set to "openai" to use GPT, or "gemini" to use Google Gemini.
-    LLM_PROVIDER: str = "openai"
+    LLM_PROVIDER: str = "gemini"
 
     # ── OpenAI (used when LLM_PROVIDER=openai) ────────────────────────────────
     OPENAI_API_KEY: str = ""
@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     FRONTEND_URL: str = "http://localhost:3000"
     PRODUCTION: bool = False  # Set to True in production to enforce HTTPS
     RESPONSE_TIMEOUT: int = 120  # Max seconds to wait for a full chat response (Selenium tools need ~60s)
-
+      
     class Config:
         env_file = ".env"
         extra = "ignore"
