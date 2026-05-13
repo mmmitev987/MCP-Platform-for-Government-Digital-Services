@@ -200,7 +200,7 @@ def _build_system_prompt(connected_slugs: list[str]) -> str:
     Only includes institutions that are actually connected (alive).
     """
     try:
-        with open(_GATEWAY_CONFIG_PATH) as f:
+        with open(_GATEWAY_CONFIG_PATH, encoding="utf-8") as f:
             config = yaml.safe_load(f)
     except Exception as exc:
         print(f"[ChatService] Warning: could not read gateway config: {exc}", file=sys.stderr)

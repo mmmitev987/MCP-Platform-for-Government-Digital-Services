@@ -126,23 +126,22 @@ institutions:
       - "Never ask the user for internal IDs such as cv_id or oglas_id; use IDs from previous tool results."
 
   - slug: mon
-    name: "e-uslugi.mon.gov.mk"
+    name: "mon.gov.mk"
     command: python
     args:
       - "-m"
       - "institutions.mon.main"
     description: >
-      Ministry of Education and Science: browse active services and contests,
-      find out what documents are needed to apply, and look up requirements
-      for official education documents (enrollment certificates, diplomas,
-      diploma recognition, transcripts).
+      Ministry of Education and Science (МОН): browse all public competitions
+      (Конкурси) and scholarships (Стипендии) published on mon.gov.mk,
+      including full details and attached documents. No login required.
     tool_rules:
-      - "Call check_session_mon first to see if the user is already logged in."
-      - "Call login_mon only if check_session_mon says the session is inactive."
-      - "Call list_mon_services to find the service the user is asking about."
-      - "Call get_mon_service_requirements only when the user needs to know what documents to upload."
-      - "For document questions (certificates, transcripts, diplomas), use list_mon_document_types and get_mon_document_requirements — these do NOT require login."
-      - "Never call list_mon_services and get_mon_service_requirements in the same turn unless you already have the specific service ID."
+      - "Call list_mon_competitions to get all active competitions from mon.gov.mk."
+      - "Call list_mon_scholarships to get all active scholarships from mon.gov.mk."
+      - "Call get_mon_competition_details(url) only after the user selects a specific competition from list_mon_competitions results."
+      - "Call get_mon_scholarship_details(url) only after the user selects a specific scholarship from list_mon_scholarships results."
+      - "Never call a detail tool without first having a URL from the corresponding list tool."
+      - "All MON tools are public — no login is required."
 
   - slug: katastar
     name: "e-uslugi.katastar.gov.mk"
