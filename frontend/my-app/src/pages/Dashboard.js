@@ -209,7 +209,7 @@ export default function Dashboard() {
 
   const QUICK_ACTIONS = [
     { labelKey: "actions.bookAppointment", descKey: "actions.bookAppointmentDesc", Icon: CalendarIcon, path: "/assistant", q: isMk ? "Кога има слободни термини кај лекар?" : "When are there available appointment slots with a doctor?", accent: "#6366f1", accentBg: "rgba(99,102,241,0.08)" },
-    { labelKey: "actions.checkDocuments",  descKey: "actions.checkDocumentsDesc",  Icon: DocumentIcon, path: "/assistant", q: isMk ? "Кои документи се потребни?" : "What documents are required?", accent: "#0ea5e9", accentBg: "rgba(14,165,233,0.08)" },
+    { labelKey: "actions.checkDocuments",  descKey: "actions.checkDocumentsDesc",  Icon: DocumentIcon, path: "/assistant", q: null, accent: "#0ea5e9", accentBg: "rgba(14,165,233,0.08)" },
     { labelKey: "actions.chats",            descKey: "actions.chatsDesc",           Icon: ChatIcon,     path: "/chats",     q: null, accent: "#8b5cf6", accentBg: "rgba(139,92,246,0.08)" },
     { labelKey: "actions.myActivity",      descKey: "actions.myActivityDesc",      Icon: ActivityIcon, path: "/activity",  q: null, accent: "#10b981", accentBg: "rgba(16,185,129,0.08)" },
   ];
