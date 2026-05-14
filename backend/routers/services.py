@@ -44,6 +44,12 @@ INSTITUTIONS = [
         "url": "https://e-uslugi.mon.gov.mk",
     },
     {
+        "slug": "katastar",
+        "name": "Катастар",
+        "description": "Електронски услуги на Агенција за катастар на недвижности — имотни листови, парцели и згради.",
+        "url": "https://e-uslugi.katastar.gov.mk",
+    },
+    {
         "slug": "agencijaZaVrabotuvanje",
         "name": "Агенција за вработување",
         "description": "Портал за пребарување огласи за работа, управување со CV и поднесување пријави — av.gov.mk.",
