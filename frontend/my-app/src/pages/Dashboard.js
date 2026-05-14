@@ -60,31 +60,39 @@ const ACTION_LABELS_EN = {
 };
 
 const INST_NAMES_MK = {
-  uslugi:    "uslugi.gov.mk",
-  mojtermin: "Мој Термин",
-  crm:       "Централен регистар",
-  mon:       "Министерство за образование",
+  uslugi:                 "uslugi.gov.mk",
+  mojtermin:              "Мој Термин",
+  crm:                    "Централен регистар",
+  mon:                    "Министерство за образование",
+  katastar:               "Катастар",
+  agencijaZaVrabotuvanje: "Агенција за вработување",
 };
 
 const INST_NAMES_EN = {
-  uslugi:    "uslugi.gov.mk",
-  mojtermin: "Moj Termin",
-  crm:       "Central Registry",
-  mon:       "Ministry of Education",
+  uslugi:                 "uslugi.gov.mk",
+  mojtermin:              "Moj Termin",
+  crm:                    "Central Registry",
+  mon:                    "Ministry of Education",
+  katastar:               "Cadastre",
+  agencijaZaVrabotuvanje: "Employment Agency",
 };
 
 const INST_DESC_MK = {
-  uslugi:    "Главен портал за административни постапки — пасоши, лични карти, возачки дозволи и повеќе.",
-  mojtermin: "Систем за закажување медицински прегледи — пронајдете лекари и закажете посета.",
-  crm:       "Централен регистар на Северна Македонија — регистрација на компании и деловни услуги.",
-  mon:       "Портал за образовни услуги — пријавување документи, барања и услуги за ученици и студенти.",
+  uslugi:                 "Главен портал за административни постапки — пасоши, лични карти, возачки дозволи и повеќе.",
+  mojtermin:              "Систем за закажување медицински прегледи — пронајдете лекари и закажете посета.",
+  crm:                    "Централен регистар на Северна Македонија — регистрација на компании и деловни услуги.",
+  mon:                    "Портал за образовни услуги — пријавување документи, барања и услуги за ученици и студенти.",
+  katastar:               "Електронски услуги на Агенција за катастар на недвижности — имотни листови, парцели и згради.",
+  agencijaZaVrabotuvanje: "Портал за пребарување огласи за работа, управување со CV и поднесување пријави.",
 };
 
 const INST_DESC_EN = {
-  uslugi:    "Main portal for administrative procedures — passports, ID cards, driver's licenses and more.",
-  mojtermin: "Medical appointment scheduling — find doctors and book visits.",
-  crm:       "Central Registry of North Macedonia — company registration and business services.",
-  mon:       "Educational services portal — documents, requests and services for students and pupils.",
+  uslugi:                 "Main portal for administrative procedures — passports, ID cards, driver's licenses and more.",
+  mojtermin:              "Medical appointment scheduling — find doctors and book visits.",
+  crm:                    "Central Registry of North Macedonia — company registration and business services.",
+  mon:                    "Educational services portal — documents, requests and services for students and pupils.",
+  katastar:               "Electronic services of the Real Estate Cadastre Agency — property certificates, parcels and buildings.",
+  agencijaZaVrabotuvanje: "Portal for job listings, CV management and submitting job applications.",
 };
 
 function Badge({ status, t }) {
@@ -200,8 +208,8 @@ export default function Dashboard() {
   const [institutions, setInstitutions] = useState([]);
 
   const QUICK_ACTIONS = [
-    { labelKey: "actions.bookAppointment", descKey: "actions.bookAppointmentDesc", Icon: CalendarIcon, path: "/assistant", q: isMk ? "Сакам да закажам медицински преглед" : "I want to book a medical appointment", accent: "#6366f1", accentBg: "rgba(99,102,241,0.08)" },
-    { labelKey: "actions.checkDocuments",  descKey: "actions.checkDocumentsDesc",  Icon: DocumentIcon, path: "/services",   q: null, accent: "#0ea5e9", accentBg: "rgba(14,165,233,0.08)" },
+    { labelKey: "actions.bookAppointment", descKey: "actions.bookAppointmentDesc", Icon: CalendarIcon, path: "/assistant", q: isMk ? "Кога има слободни термини кај лекар?" : "When are there available appointment slots with a doctor?", accent: "#6366f1", accentBg: "rgba(99,102,241,0.08)" },
+    { labelKey: "actions.checkDocuments",  descKey: "actions.checkDocumentsDesc",  Icon: DocumentIcon, path: "/assistant", q: isMk ? "Кои документи се потребни?" : "What documents are required?", accent: "#0ea5e9", accentBg: "rgba(14,165,233,0.08)" },
     { labelKey: "actions.chats",            descKey: "actions.chatsDesc",           Icon: ChatIcon,     path: "/chats",     q: null, accent: "#8b5cf6", accentBg: "rgba(139,92,246,0.08)" },
     { labelKey: "actions.myActivity",      descKey: "actions.myActivityDesc",      Icon: ActivityIcon, path: "/activity",  q: null, accent: "#10b981", accentBg: "rgba(16,185,129,0.08)" },
   ];
@@ -292,9 +300,9 @@ export default function Dashboard() {
                 </button>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {institutions.map((inst) => {
+                {institutions.slice(0, 4).map((inst) => {
                   const meta = getInstMeta(inst.slug || inst.name);
-                  const slugKey = Object.keys(INST_NAMES_MK).find(k => inst.slug?.includes(k)) || "";
+                  const slugKey = Object.keys(INST_NAMES_MK).find(k => inst.slug === k || inst.slug?.includes(k)) || "";
                   const instNames = i18n.language === "en" ? INST_NAMES_EN : INST_NAMES_MK;
                   const instDescs = i18n.language === "en" ? INST_DESC_EN : INST_DESC_MK;
                   return (
