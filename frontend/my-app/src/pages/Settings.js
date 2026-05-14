@@ -197,17 +197,6 @@ export default function Settings() {
                     ))}
                   </div>
                 </div>
-                <div className="flex items-center justify-between py-1">
-                  <div>
-                    <p className="text-sm font-medium" style={{ color: "#1e293b" }}>{t("settings.notifications")}</p>
-                    <p className="text-xs mt-0.5" style={{ color: "#94a3b8" }}>{t("settings.notificationsDesc")}</p>
-                  </div>
-                  <button type="button" onClick={() => setForm((f) => ({ ...f, notifications: !f.notifications }))}
-                    className="relative w-11 h-6 rounded-full transition-all"
-                    style={{ background: form.notifications ? "#6366f1" : "#e2e8f0" }}>
-                    <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${form.notifications ? "translate-x-5" : "translate-x-0"}`} />
-                  </button>
-                </div>
                 <div className="mt-auto pt-2">
                   <GradientBtn type="submit" disabled={saving}>
                     {saving ? t("settings.saving") : saved ? t("settings.saved") : t("settings.saveChanges")}

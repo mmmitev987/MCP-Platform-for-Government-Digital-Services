@@ -12,8 +12,6 @@ function withTimeout(promise, ms) {
   return Promise.race([promise, timeout]);
 }
 
-const STATUS_KEYS = ["all", "completed", "pending"];
-
 function Badge({ status, t }) {
   const styles = {
     completed: { background: "rgba(34,197,94,0.1)", color: "#16a34a", border: "1px solid rgba(34,197,94,0.2)" },
@@ -62,21 +60,18 @@ const INST_NAMES = {
 export default function Activity() {
   const { t } = useTranslation();
   const [data, setData] = useState({ items: [], total: 0 });
-  const [status, setStatus] = useState("all");
   const [page, setPage] = useState(1);
   const [loadError, setLoadError] = useState(null);
   const limit = 15;
 
   useEffect(() => {
     setLoadError(null);
-    const params = { page, limit };
-    if (status !== "all") params.status = status;
-    withTimeout(getActivity(params), LOAD_TIMEOUT_MS)
+    withTimeout(getActivity({ page, limit }), LOAD_TIMEOUT_MS)
       .then(setData)
       .catch((err) => {
         setLoadError(err.message === "timeout" ? "timeout" : "error");
       });
-  }, [status, page]);
+  }, [page]);
 
   const totalPages = Math.ceil(data.total / limit);
 
@@ -109,21 +104,9 @@ export default function Activity() {
         </div>
       )}
 
-      {/* Filter tabs + total */}
-      <div className="flex flex-wrap items-center gap-2 mb-6">
-        {STATUS_KEYS.map((s) => (
-          <button
-            key={s}
-            onClick={() => { setStatus(s); setPage(1); }}
-            className="px-4 py-1.5 rounded-xl text-sm font-medium transition-all"
-            style={status === s
-              ? { background: "linear-gradient(135deg,#6366f1,#8b5cf6)", color: "#ffffff", boxShadow: "0 2px 10px rgba(99,102,241,0.3)" }
-              : { background: "#ffffff", color: "#64748b", border: "1px solid rgba(99,102,241,0.15)" }}
-          >
-            {t(`activity.statuses.${s}`)}
-          </button>
-        ))}
-        <span className="ml-auto text-sm font-medium" style={{ color: "#94a3b8" }}>
+      {/* Total count */}
+      <div className="flex items-center mb-6">
+        <span className="text-sm font-medium" style={{ color: "#94a3b8" }}>
           <span style={{ color: "#6366f1", fontWeight: 800, fontSize: "1.25rem" }}>{data.total}</span> {t("activity.total")}
         </span>
       </div>

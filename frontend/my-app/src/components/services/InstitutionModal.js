@@ -50,21 +50,21 @@ const INSTITUTION_DETAILS = {
     workingHours: "Пон–Пет, 08:30–16:30",
     mapQuery: "Ministry+of+Education+Skopje+North+Macedonia",
   },
+  agencijaZaVrabotuvanje: {
+    fullName: "Агенција за вработување на Република Северна Македонија",
+    address: "Бул. Јане Сандански 114, 1000 Скопје",
+    phone: "+389 2 3116 811",
+    email: "info@av.gov.mk",
+    workingHours: "Пон–Пет, 07:30–15:30",
+    mapQuery: "Agency+for+Employment+Jane+Sandanski+Skopje+North+Macedonia",
+  },
   katastar: {
     fullName: "Агенција за катастар на недвижности",
     address: "Бул. Александар Македонски бб, 1000 Скопје",
     phone: "+389 2 3103 400",
     email: "akn@katastar.gov.mk",
-    workingHours: "Пон–Пет, 08:30–16:30",
+    workingHours: "Пон–Пет, 08:00–16:00",
     mapQuery: "Agency+for+Real+Estate+Cadastre+Skopje+North+Macedonia",
-  },
-  agencijaZaVrabotuvanje: {
-    fullName: "Агенција за вработување на Република Македонија",
-    address: "Бул. Јане Сандански 113, 1000 Скопје",
-    phone: "+389 2 3109 400",
-    email: "contact@av.gov.mk",
-    workingHours: "Пон–Пет, 08:30–16:30",
-    mapQuery: "Employment+Agency+North+Macedonia+Skopje",
   },
 };
 
