@@ -1,0 +1,161 @@
+services:
+
+  # ── Reverse proxy (public entry point) ──────────────────────────────────────
+  proxy:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - certs:/etc/letsencrypt:ro
+    depends_on:
+      - backend
+      - frontend
+    networks:
+      - mcp_net
+    restart: unless-stopped
+
+  # ── React frontend ───────────────────────────────────────────────────────────
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    networks:
+      - mcp_net
+    restart: unless-stopped
+
+  # ── Backend API + Gateway (gateway runs as subprocess inside this container) ─
+  # All Python services share this one built image — only backend has the build
+  # section; every other Python service references the same image tag.
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: govmcp-python:latest
+    command:
+      - uvicorn
+      - backend.main:app
+      - --host
+      - "0.0.0.0"
+      - --port
+      - "8000"
+      - --workers
+      - "4"
+    environment:
+      PRODUCTION: "true"
+      # SSE URLs for each institution container (gateway reads these at startup)
+      USLUGI_MCP_URL: http://uslugi:8001/sse
+      MOJTERMIN_MCP_URL: http://mojtermin:8002/sse
+      KATASTAR_MCP_URL: http://katastar:8003/sse
+      CRM_MCP_URL: http://crm:8004/sse
+      MON_MCP_URL: http://mon:8005/sse
+      AGENCIJAZAVRABOTUVANJE_MCP_URL: http://agencija:8006/sse
+    env_file:
+      - .env
+    volumes:
+      - storage_data:/app/storage
+    depends_on:
+      - uslugi
+      - mojtermin
+      - katastar
+      - crm
+      - mon
+      - agencija
+    networks:
+      - mcp_net
+    restart: unless-stopped
+
+  # ── Institution: uslugi.gov.mk ───────────────────────────────────────────────
+  uslugi:
+    image: govmcp-python:latest
+    command: ["python", "-m", "institutions.uslugi.main"]
+    environment:
+      MCP_TRANSPORT: sse
+      MCP_PORT: "8001"
+    env_file:
+      - .env
+    volumes:
+      - storage_data:/app/storage
+    networks:
+      - mcp_net
+    restart: unless-stopped
+
+  # ── Institution: mojtermin.mk ────────────────────────────────────────────────
+  mojtermin:
+    image: govmcp-python:latest
+    command: ["python", "-m", "institutions.mojtermin.main"]
+    environment:
+      MCP_TRANSPORT: sse
+      MCP_PORT: "8002"
+    env_file:
+      - .env
+    networks:
+      - mcp_net
+    restart: unless-stopped
+
+  # ── Institution: e-uslugi.katastar.gov.mk ───────────────────────────────────
+  katastar:
+    image: govmcp-python:latest
+    command: ["python", "-m", "institutions.katastar.main"]
+    environment:
+      MCP_TRANSPORT: sse
+      MCP_PORT: "8003"
+    env_file:
+      - .env
+    volumes:
+      - storage_data:/app/storage
+    networks:
+      - mcp_net
+    restart: unless-stopped
+
+  # ── Institution: crm.com.mk ──────────────────────────────────────────────────
+  crm:
+    image: govmcp-python:latest
+    command: ["python", "-m", "institutions.crm.main"]
+    environment:
+      MCP_TRANSPORT: sse
+      MCP_PORT: "8004"
+    env_file:
+      - .env
+    networks:
+      - mcp_net
+    restart: unless-stopped
+
+  # ── Institution: mon.gov.mk ──────────────────────────────────────────────────
+  mon:
+    image: govmcp-python:latest
+    command: ["python", "-m", "institutions.mon.main"]
+    environment:
+      MCP_TRANSPORT: sse
+      MCP_PORT: "8005"
+    env_file:
+      - .env
+    networks:
+      - mcp_net
+    restart: unless-stopped
+
+  # ── Institution: e-rabota.av.gov.mk ─────────────────────────────────────────
+  agencija:
+    image: govmcp-python:latest
+    command: ["python", "-m", "institutions.agencijaZaVrabotuvanje.main"]
+    environment:
+      MCP_TRANSPORT: sse
+      MCP_PORT: "8006"
+    env_file:
+      - .env
+    volumes:
+      - storage_data:/app/storage
+    networks:
+      - mcp_net
+    restart: unless-stopped
+
+# ── Volumes ──────────────────────────────────────────────────────────────────
+volumes:
+  storage_data:  # SQLite DB + encrypted session cookies
+  certs:         # Let's Encrypt SSL certificates
+
+# ── Networks ─────────────────────────────────────────────────────────────────
+networks:
+  mcp_net:
+    driver: bridge

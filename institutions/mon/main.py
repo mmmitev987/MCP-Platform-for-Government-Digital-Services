@@ -102,4 +102,10 @@ def get_mon_scholarship_details(url: str) -> dict:
 
 # ── Entry point ───────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    mcp.run()
+    import os
+    if os.getenv("MCP_TRANSPORT") == "sse":
+        mcp.settings.host = "0.0.0.0"
+        mcp.settings.port = int(os.getenv("MCP_PORT", "8005"))
+        mcp.run(transport="sse")
+    else:
+        mcp.run()
