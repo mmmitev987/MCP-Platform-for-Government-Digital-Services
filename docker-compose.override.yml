@@ -1,0 +1,33 @@
+# docker-compose.override.yml — LOCAL TESTING ONLY
+#
+# Docker Compose automatically merges this with docker-compose.yml.
+# It exposes services directly on localhost (no SSL required).
+#
+# Usage:
+#   docker compose up            ← uses both files automatically
+#   docker compose up backend    ← start only backend + its dependencies
+#
+# Access:
+#   http://localhost:8000/docs   → FastAPI Swagger UI
+#   http://localhost:3000        → React frontend
+#   http://localhost:80          → nginx (HTTP only, no SSL redirect)
+
+services:
+  # Expose backend directly (bypass proxy for local dev)
+  backend:
+    ports:
+      - "8000:8000"
+    environment:
+      PRODUCTION: "false"  # disable HTTPS redirect middleware locally
+
+  # Expose frontend directly
+  frontend:
+    ports:
+      - "3000:80"
+
+  # Replace production nginx with a simple HTTP-only proxy (no SSL certs needed)
+  proxy:
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.local.conf:/etc/nginx/nginx.conf:ro

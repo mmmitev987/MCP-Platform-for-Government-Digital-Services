@@ -135,7 +135,7 @@ export default function Services() {
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-5">
           {institutions.map((inst) => {
-            const slugKey = Object.keys(INST_ICONS).find(k => inst.slug.includes(k)) || "";
+            const slugKey = Object.keys(INST_ICONS).find(k => inst.slug === k || inst.slug.includes(k)) || "";
             const icon = INST_ICONS[slugKey] || <DefaultIcon />;
             const INST_ACTIONS = i18n.language === "en" ? INST_ACTIONS_EN : INST_ACTIONS_MK;
             const actions = INST_ACTIONS[slugKey] || [];

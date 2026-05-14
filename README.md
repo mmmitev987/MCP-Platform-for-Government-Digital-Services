@@ -2,41 +2,49 @@
 
 A full-stack web application that lets Macedonian citizens interact with government online portals through a conversational AI assistant. Built with FastAPI, React, and the Model Context Protocol (MCP).
 
+**Live:** http://89.168.115.57
+
 ---
 
 ## What It Does
 
-Users log in to the web app, then chat with an AI assistant (powered by Google Gemini Flash) that can look up information and take actions on government portals on their behalf — passport renewal info, doctor appointments, pharmacist licensing, vehicle registration, and more.
+Users log in to the web app, then chat with an AI assistant (powered by Google Gemini Flash or OpenAI GPT) that can look up information and take actions on government portals on their behalf — passport renewal info, doctor appointments, job listings, property certificates, company registration, and more.
 
 The AI has no direct access to the portals. Instead, it calls **MCP tools** — structured functions that talk to each institution's API — and summarises the results in plain language.
+
+---
+
+## Supported Institutions
+
+| Institution | What it covers |
+|---|---|
+| **uslugi.gov.mk** | Passports, ID cards, driver's licenses, administrative procedures |
+| **mojtermin.mk** | Doctor appointments, available slots, medical specialties |
+| **crm.com.mk** | Company registration, founders, annual reports |
+| **mon.gov.mk** | Competitions, scholarships, educational services |
+| **katastar.gov.mk** | Property certificates, parcels, buildings |
+| **av.gov.mk** | Job listings, CV management, job applications |
 
 ---
 
 ## Architecture
 
 ```
-Browser (React :3000)
-    │  HTTP REST + JWT
-    ▼
-FastAPI (:8000)
-    ├── /api/auth/*       — register, login, me
-    ├── /api/chat/*       — send message, session history
-    ├── /api/services/*   — list connected services
-    ├── /api/activity/*   — paginated tool-call log
-    └── /api/settings/*   — user profile & preferences
-    │  in-process async call
-    ▼
-ChatService  (singleton, lives for the lifetime of the FastAPI process)
-    │  MCP JSON-RPC over stdio
-    ▼
-gateway/main.py  (aggregates all institutions under namespaced tool names)
-    │                          │
-    ▼                          ▼
-institutions/uslugi/       institutions/mojtermin/
-main.py (88 tools)         main.py (15 tools)
+[Internet]
+     │
+[nginx proxy :80/:443]
+     │              │
+[frontend :80]  [backend :8000]
+                    │  stdio
+                [Gateway]
+                    │  SSE (Docker) / stdio (local)
+    ┌──────┬─────────┼──────────┬──────┬──────────┐
+    ▼      ▼         ▼          ▼      ▼          ▼
+ uslugi mojtermin katastar    crm    mon       agencija
+ :8001   :8002     :8003      :8004  :8005      :8006
 ```
 
-Each institution server is a **FastMCP** process. The gateway spawns them as subprocesses on startup and multiplexes their tools under a `institutionname__toolname` namespace (e.g. `uslugi__mvr_info_passport_renewal`, `mojtermin__get_doctors_by_city`).
+Each institution runs as a **FastMCP** server. The gateway connects to all of them and exposes their tools under a namespaced format: `institutionname__toolname` (e.g. `mojtermin__get_doctors`, `crm__search_companies`).
 
 ---
 
@@ -47,111 +55,82 @@ MCP-Platform-for-Government-Digital-Services/
 │
 ├── backend/                        # FastAPI application
 │   ├── main.py                     # App entry point, lifespan, CORS
-│   ├── config.py                   # Settings from .env (API key, JWT secret, DB path)
-│   ├── database.py                 # SQLAlchemy engine + get_db() dependency
-│   ├── dependencies.py             # get_current_user() JWT dependency
-│   ├── models/
-│   │   ├── user.py                 # User table (email, hashed_password, preferences)
-│   │   ├── chat.py                 # ChatSession + Message tables
-│   │   └── activity.py            # ActivityLog table (one row per tool call)
-│   ├── schemas/                    # Pydantic request/response schemas
+│   ├── config.py                   # Settings from .env
+│   ├── models/                     # SQLAlchemy models (User, Chat, Activity)
 │   ├── services/
-│   │   ├── auth_service.py         # bcrypt hashing + JWT creation/decoding
-│   │   └── chat_service.py         # ChatService singleton — owns the gateway subprocess
+│   │   ├── auth_service.py         # bcrypt + JWT
+│   │   ├── chat_service.py         # ChatService — owns gateway subprocess
+│   │   └── email_service.py        # Password reset emails (Gmail SMTP)
 │   └── routers/
-│       ├── auth.py                 # POST /api/auth/register, login, GET /api/auth/me
-│       ├── chat.py                 # POST /api/chat, GET /api/chat/sessions
-│       ├── services.py             # GET /api/services (static catalogue)
-│       ├── activity.py             # GET /api/activity (paginated, filterable)
-│       └── settings.py            # GET/PATCH /api/settings
+│       ├── auth.py                 # register, login, forgot/reset password
+│       ├── chat.py                 # send message, session history
+│       ├── services.py             # institutions catalogue
+│       ├── activity.py             # paginated tool-call log
+│       └── settings.py            # user profile & preferences
 │
 ├── gateway/
-│   └── main.py                     # MCP aggregator — spawns institution subprocesses,
+│   └── main.py                     # MCP aggregator — connects to all institutions,
 │                                   # namespaces their tools, routes calls
 │
 ├── institutions/                   # One folder per connected institution
-│   ├── uslugi/                     # uslugi.gov.mk — main government services portal
-│   │   ├── main.py                 # FastMCP server, registers all uslugi tools
-│   │   ├── config.py
-│   │   ├── auth/                   # Browser-based login (Playwright), session storage
-│   │   ├── client/                 # Authenticated HTTP client
-│   │   └── tools/
-│   │       ├── session_tools.py    # login, logout, check_session
-│   │       ├── portal_tools.py     # info_passport_renewal (authenticated fetch)
-│   │       ├── mvr_info.py         # 46 MVR public-info tools (no login needed)
-│   │       └── fk_info.py          # 17 Pharmacists Chamber public-info tools
-│   │
-│   └── mojtermin/                  # mojtermin.mk — government appointment booking
-│       ├── main.py                 # FastMCP server, registers all mojtermin tools
-│       └── tools/
-│           ├── appointments.py     # get_locations, get_doctors, get_available_appointments …
-│           ├── resources.py        # get_clinics, get_resources_by_city, search_resources …
-│           └── slots.py            # get_available_slots, get_slots_range, get_first_available …
-│
-├── agent/
-│   └── gemini_agent.py             # Original CLI agent (still works standalone)
+│   ├── uslugi/                     # uslugi.gov.mk
+│   ├── mojtermin/                  # mojtermin.mk
+│   ├── katastar/                   # e-uslugi.katastar.gov.mk
+│   ├── crm/                        # crm.com.mk
+│   ├── mon/                        # mon.gov.mk
+│   └── agencijaZaVrabotuvanje/     # e-rabota.av.gov.mk
 │
 ├── frontend/my-app/                # React application
 │   └── src/
-│       ├── api/                    # axios client + per-endpoint API modules
-│       ├── contexts/AuthContext.js # JWT storage, login/logout
-│       ├── hooks/useChat.js        # Chat state management
-│       ├── components/
-│       │   ├── layout/             # Sidebar, TopBar, ProtectedRoute, AppLayout
-│       │   └── chat/               # MessageBubble, ChatInput, SuggestedQuestions
-│       └── pages/
-│           ├── SignIn.js           # Screen 1 — email + password
-│           ├── Dashboard.js        # Screen 2 — quick actions, recent activity
-│           ├── Assistant.js        # Screen 3 — chat interface
-│           ├── Services.js         # Screen 4 — services catalogue by category
-│           ├── Activity.js         # Screen 5 — paginated tool-call history
-│           └── Settings.js         # Screen 6 — profile, language, notifications
+│       ├── api/                    # axios client + per-endpoint modules
+│       ├── contexts/AuthContext.js
+│       ├── pages/
+│       │   ├── SignIn.js / Register.js
+│       │   ├── Dashboard.js        # quick actions, institutions, recent activity
+│       │   ├── Assistant.js        # AI chat interface
+│       │   ├── Services.js         # institutions catalogue
+│       │   ├── Activity.js         # tool-call history
+│       │   ├── Settings.js         # profile, language, notifications
+│       │   ├── ForgotPassword.js
+│       │   └── ResetPassword.js
+│       └── components/
 │
-├── storage/
-│   └── app.db                      # SQLite database (auto-created, gitignored)
+├── nginx/
+│   ├── nginx.conf                  # Production (SSL)
+│   ├── nginx.local.conf            # Local development (HTTP only)
+│   └── frontend.conf               # React SPA catch-all
 │
-├── .env                            # Secrets — copy from .env.example
+├── Dockerfile                      # Shared Python image (backend + all institutions)
+├── Dockerfile.frontend             # Multi-stage Node → nginx
+├── docker-compose.yml              # Production orchestration (9 services)
+├── docker-compose.override.yml     # Local dev overrides (exposes ports, no SSL)
+├── DEPLOYMENT.md                   # Hosting & Docker explained in Macedonian
 ├── .env.example
 └── requirements.txt
 ```
 
 ---
 
-## Quick Start
+## Quick Start (Local)
 
 ### Prerequisites
 
 - Python 3.11+
 - Node.js 18+
-- A free [Google AI Studio](https://aistudio.google.com) API key
-- Chromium/Google Chrome + matching ChromeDriver (major versions must match; required for Selenium-based integrations, e.g. Agencija za Vrabotuvanje)
+- A [Google AI Studio](https://aistudio.google.com) API key (free) or OpenAI API key
 
-### 1. Clone and install Python dependencies
+### 1. Install dependencies
 
 ```bash
 pip install -r requirements.txt
 python -m playwright install chromium
 ```
 
-If you're using Selenium-based institution integrations (for example Agencija za Vrabotuvanje) in Linux CI/server environments, also install a browser + driver for Selenium.
-Package names and availability vary by distro/version, so verify package names in your distribution's package repository before installing. For Debian/Ubuntu, install the Chromium + ChromeDriver packages available in apt:
-
-```bash
-sudo apt-get update
-sudo apt-get install -y chromium chromium-driver
-```
-
-### 2. Configure environment variables
+### 2. Configure environment
 
 ```bash
 cp .env.example .env
-```
-
-Open `.env` and set:
-
-```env
-GEMINI_API_KEY=your_key_here
-JWT_SECRET=any_long_random_string
+# Set GEMINI_API_KEY (or OPENAI_API_KEY) and JWT_SECRET
 ```
 
 ### 3. Start the backend
@@ -159,12 +138,6 @@ JWT_SECRET=any_long_random_string
 ```bash
 uvicorn backend.main:app --reload --port 8000
 ```
-
-On startup the backend will:
-- Create `storage/app.db` with all tables
-- Spawn the gateway subprocess
-- Connect to all institution MCP servers
-- Print how many tools are available
 
 ### 4. Start the frontend
 
@@ -178,119 +151,54 @@ Open [http://localhost:3000](http://localhost:3000), register an account, and st
 
 ---
 
+## Docker (Local Testing)
+
+```bash
+docker compose up
+```
+
+The `docker-compose.override.yml` is picked up automatically and exposes:
+- `http://localhost:3000` → frontend
+- `http://localhost:8000/docs` → FastAPI Swagger UI
+- `http://localhost:80` → nginx proxy
+
+---
+
+## Docker (Production Deploy)
+
+```bash
+# On the server
+git clone https://github.com/mmmitev987/MCP-Platform-for-Government-Digital-Services /app
+cd /app
+cp .env.example .env && nano .env   # fill in API keys
+docker compose build
+docker compose up -d
+```
+
+See [DEPLOYMENT.md](DEPLOYMENT.md) for full hosting details.
+
+---
+
 ## How the AI Handles Conversations
 
-1. The user sends a message via the React chat UI.
-2. FastAPI passes it to `ChatService.chat()`, which holds the full conversation history per user.
-3. The history + all tool schemas are sent to Gemini Flash.
-4. Gemini decides which tool to call (if any) and returns a `function_call`.
-5. The service calls the tool via the MCP gateway, which routes it to the right institution server.
-6. The tool result is added to the history and sent back to Gemini.
-7. Steps 4–6 repeat until Gemini produces a plain-text final answer.
-8. The answer, the session, and an activity log entry are saved to the database.
+1. User sends a message via the React chat UI.
+2. FastAPI passes it to `ChatService.chat()` with the full conversation history.
+3. History + all 56 tool schemas are sent to Gemini / GPT.
+4. The model decides which tool to call and returns a `function_call`.
+5. The service calls the tool via the MCP gateway → routed to the right institution.
+6. The tool result is added to history and sent back to the model.
+7. Steps 4–6 repeat until the model produces a plain-text final answer.
+8. The answer, session, and activity log entry are saved to SQLite.
 
 ---
 
 ## Adding a New Institution
 
-### 1. Create the institution folder
-
-```
-institutions/
-└── myinstitution/
-    ├── __init__.py
-    ├── main.py          ← FastMCP server
-    └── tools/
-        ├── __init__.py
-        └── my_tools.py  ← your tool functions
-```
-
-### 2. Write your tools
-
-```python
-# institutions/myinstitution/tools/my_tools.py
-
-def get_something(param: str) -> dict:
-    """Description that Gemini will read to decide when to call this tool."""
-    # Call your institution's API here
-    return {"result": "..."}
-```
-
-Keep tool functions simple and synchronous. Return a plain dict or string. The gateway and ChatService handle all the MCP/async plumbing.
-
-### 3. Register tools in main.py
-
-```python
-# institutions/myinstitution/main.py
-from fastmcp import FastMCP
-from institutions.myinstitution.tools.my_tools import get_something
-
-mcp = FastMCP("myinstitution")
-
-@mcp.tool()
-def get_something_tool(param: str) -> dict:
-    """Description Gemini will use."""
-    return get_something(param)
-
-if __name__ == "__main__":
-    mcp.run()
-```
-
-### 4. Register the institution in the gateway
-
-Open [`gateway/main.py`](gateway/main.py) and add your institution to the `INSTITUTIONS` list:
-
-```python
-INSTITUTIONS = [
-    {"name": "uslugi.gov.mk",    "key": "uslugi",        "module": "institutions.uslugi.main"},
-    {"name": "mojtermin.mk",     "key": "mojtermin",     "module": "institutions.mojtermin.main"},
-    {"name": "myinstitution.mk", "key": "myinstitution", "module": "institutions.myinstitution.main"},  # ← add this
-]
-```
-
-The `key` becomes the tool name prefix (e.g. `myinstitution__get_something`).
-
-### 5. Update the services catalogue (optional)
-
-Open [`backend/routers/services.py`](backend/routers/services.py) and add your institution's tools to the catalogue so they appear on the Services page in the UI.
-
-That's all. Restart the backend — the gateway will pick up the new institution automatically.
-
----
-
-## Adding Tools to an Existing Institution
-
-For **uslugi.gov.mk**, add a new file under `institutions/uslugi/tools/` and import it in `institutions/uslugi/main.py`.
-
-**Public-info tools** (no login needed) follow the pattern in [`mvr_info.py`](institutions/uslugi/tools/mvr_info.py):
-
-```python
-def _build_info(service_id: int) -> dict:
-    import requests
-    resp = requests.post(
-        "https://uslugi.gov.mk/api/Services/GetServiceDetails",
-        json={"serviceId": service_id},
-        timeout=15,
-    )
-    return resp.json()
-
-def mvr_info_my_new_service() -> dict:
-    """What documents are needed for my new service."""
-    return _build_info(9999)  # replace with real service ID
-```
-
-**Authenticated tools** (require login) follow the pattern in [`portal_tools.py`](institutions/uslugi/tools/portal_tools.py) — use the shared `authenticated_client` which injects the stored session cookies automatically.
-
-Then register in `institutions/uslugi/main.py`:
-
-```python
-from institutions.uslugi.tools.my_new_file import mvr_info_my_new_service
-
-@mcp.tool()
-def mvr_info_my_new_service_tool() -> dict:
-    """What documents are needed for my new service."""
-    return mvr_info_my_new_service()
-```
+1. Create `institutions/myinstitution/main.py` with a `FastMCP` server and `@mcp.tool()` decorated functions.
+2. Add the institution to `gateway/config.yaml`.
+3. Add a new service entry in `backend/routers/services.py`.
+4. Add metadata (name, description, icon) in `frontend/my-app/src/pages/Services.js` and `Dashboard.js`.
+5. Add a Docker service in `docker-compose.yml` with `MCP_TRANSPORT=sse` and the appropriate `MCP_PORT`.
 
 ---
 
@@ -298,12 +206,13 @@ def mvr_info_my_new_service_tool() -> dict:
 
 | Concern | How it is handled |
 |---|---|
-| User passwords | Hashed with bcrypt before storage, never stored in plaintext |
-| Session tokens | JWT signed with `JWT_SECRET`, stored in browser localStorage |
-| Portal credentials | User types them in a Playwright browser window — never seen by the AI or stored |
+| User passwords | Hashed with bcrypt, never stored in plaintext |
+| Session tokens | JWT signed with `JWT_SECRET`, expires in 7 days |
+| Portal credentials | Entered in a Playwright browser window — never seen by the AI |
 | Portal cookies | Fernet-encrypted before writing to disk |
-| AI tool results | Tools return structured dicts only — raw cookies and tokens are never forwarded to Gemini |
+| AI tool results | Structured dicts only — raw cookies/tokens never forwarded to the model |
 | Protected routes | All `/api/*` endpoints (except auth) require a valid JWT |
+| HTTPS redirect | Enabled in production via `PRODUCTION=true` middleware |
 
 ---
 
@@ -311,10 +220,11 @@ def mvr_info_my_new_service_tool() -> dict:
 
 | Layer | Technology |
 |---|---|
-| AI model | Google Gemini 2.5 Flash (free tier) |
-| Tool protocol | Model Context Protocol (MCP) over stdio |
+| AI model | Google Gemini 2.5 Flash / OpenAI GPT-4o-mini |
+| Tool protocol | Model Context Protocol (MCP) — SSE in Docker, stdio locally |
 | Backend | FastAPI + SQLAlchemy + SQLite |
-| Auth | JWT (python-jose) + bcrypt |
+| Auth | JWT (python-jose) + bcrypt + Gmail SMTP (password reset) |
 | Frontend | React + React Router v6 + Tailwind CSS v3 |
-| HTTP client | axios with JWT interceptor |
-| Browser automation | Playwright (Chromium) |
+| Browser automation | Playwright (Chromium) + Selenium |
+| Containerisation | Docker + Docker Compose (9 services) |
+| Hosting | Oracle Cloud Free Tier — VM.Standard.E5.Flex |

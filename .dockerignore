@@ -1,0 +1,33 @@
+.git
+.gitignore
+.env
+.env.local
+.env.*.local
+
+# Python cache
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache
+*.egg-info
+dist/
+build/
+
+# Node / frontend build artifacts
+frontend/my-app/node_modules
+frontend/my-app/build
+
+# Storage (mounted as Docker volume, not baked into image)
+storage/app.db
+storage/app.db-shm
+storage/app.db-wal
+storage/*.enc
+
+# Claude Code internal
+.claude/
+
+# Docs
+*.md
+CHANGES.md
+FUNCTIONAL_REQUIREMENTS.md

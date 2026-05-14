@@ -44,16 +44,16 @@ INSTITUTIONS = [
         "url": "https://e-uslugi.mon.gov.mk",
     },
     {
-        "slug": "agencijaZaVrabotuvanje",
-        "name": "Агенција за вработување",
-        "description": "Агенција за вработување на Република Северна Македонија — огласи за работа, биро за невработени и активни мерки за вработување.",
-        "url": "https://av.gov.mk",
-    },
-    {
         "slug": "katastar",
         "name": "Катастар",
-        "description": "Агенција за катастар на недвижности — имотен лист, катастарски планови и услуги поврзани со недвижен имот.",
-        "url": "https://katastar.gov.mk",
+        "description": "Електронски услуги на Агенција за катастар на недвижности — имотни листови, парцели и згради.",
+        "url": "https://e-uslugi.katastar.gov.mk",
+    },
+    {
+        "slug": "agencijaZaVrabotuvanje",
+        "name": "Агенција за вработување",
+        "description": "Портал за пребарување огласи за работа, управување со CV и поднесување пријави — av.gov.mk.",
+        "url": "https://e-rabota.av.gov.mk",
     },
 ]
 

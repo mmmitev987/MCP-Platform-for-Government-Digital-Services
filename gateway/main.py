@@ -66,6 +66,7 @@ Running
 
 import asyncio
 import json
+import os
 import sys
 from contextlib import AsyncExitStack
 from pathlib import Path
@@ -80,6 +81,7 @@ import mcp.types as types
 # ── MCP client API ────────────────────────────────────────────────────────────
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
+from mcp.client.sse import sse_client
 
 # ── Project root ──────────────────────────────────────────────────────────────
 PROJECT_ROOT = Path(__file__).parent.parent.resolve()
@@ -120,6 +122,7 @@ class InstitutionConnection:
         self.slug = slug
         self.display_name = display_name
         self.server_params = server_params
+        self.http_url: str = ""  # set to SSE URL when running in Docker
 
         self.session: ClientSession | None = None
         self.tools: list[types.Tool] = []          # original (un-namespaced) tools
@@ -147,9 +150,14 @@ class InstitutionConnection:
             self._exit_stack = AsyncExitStack()
             await self._exit_stack.__aenter__()
 
-            read, write = await self._exit_stack.enter_async_context(
-                stdio_client(self.server_params)
-            )
+            if self.http_url:
+                read, write = await self._exit_stack.enter_async_context(
+                    sse_client(self.http_url)
+                )
+            else:
+                read, write = await self._exit_stack.enter_async_context(
+                    stdio_client(self.server_params)
+                )
             self.session = await self._exit_stack.enter_async_context(
                 ClientSession(read, write)
             )
@@ -396,6 +404,7 @@ class GatewayServer:
             )
 
             conn = InstitutionConnection(slug, display_name, server_params)
+            conn.http_url = os.getenv(f"{slug.upper()}_MCP_URL", "")
             self._connections[slug] = conn
             connect_tasks.append(conn.connect())
 
