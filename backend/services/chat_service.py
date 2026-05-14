@@ -557,6 +557,7 @@ class ChatService:
     ) -> tuple[str, list[str], dict | None]:
         portal_errors: list[str] = []
         geometry: dict | None = None
+        _empty_retries = 0
 
         while True:
             try:
@@ -587,8 +588,11 @@ class ChatService:
             content = candidate.content  # genai_types.Content (role="model")
 
             if not content or not content.parts:
+                if _empty_retries < 1:
+                    _empty_retries += 1
+                    continue
                 finish = getattr(candidate, "finish_reason", None)
-                return f"The assistant could not generate a response (reason: {finish}).", portal_errors
+                return f"The assistant could not generate a response (reason: {finish}).", portal_errors, geometry
 
             # Append model's full response (may include function_call parts)
             history.append(content)

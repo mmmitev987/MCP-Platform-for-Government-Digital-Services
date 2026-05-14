@@ -108,20 +108,17 @@ const CARD_STYLE = {
 };
 
 /* ─── Quick action icons ─── */
-function CalendarIcon() {
+function DoctorIcon() {
   return (
     <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={1.75} viewBox="0 0 24 24">
-      <rect x="3" y="4" width="18" height="18" rx="2" ry="2" strokeLinecap="round" strokeLinejoin="round"/>
-      <line x1="16" y1="2" x2="16" y2="6" strokeLinecap="round"/>
-      <line x1="8" y1="2" x2="8" y2="6" strokeLinecap="round"/>
-      <line x1="3" y1="10" x2="21" y2="10" strokeLinecap="round"/>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/>
     </svg>
   );
 }
-function DocumentIcon() {
+function EUslugiIcon() {
   return (
     <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={1.75} viewBox="0 0 24 24">
-      <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/>
     </svg>
   );
 }
@@ -200,10 +197,10 @@ export default function Dashboard() {
   const [institutions, setInstitutions] = useState([]);
 
   const QUICK_ACTIONS = [
-    { labelKey: "actions.bookAppointment", descKey: "actions.bookAppointmentDesc", Icon: CalendarIcon, path: "/assistant", q: isMk ? "Сакам да закажам медицински преглед" : "I want to book a medical appointment", accent: "#6366f1", accentBg: "rgba(99,102,241,0.08)" },
-    { labelKey: "actions.checkDocuments",  descKey: "actions.checkDocumentsDesc",  Icon: DocumentIcon, path: "/services",   q: null, accent: "#0ea5e9", accentBg: "rgba(14,165,233,0.08)" },
-    { labelKey: "actions.chats",            descKey: "actions.chatsDesc",           Icon: ChatIcon,     path: "/chats",     q: null, accent: "#8b5cf6", accentBg: "rgba(139,92,246,0.08)" },
-    { labelKey: "actions.myActivity",      descKey: "actions.myActivityDesc",      Icon: ActivityIcon, path: "/activity",  q: null, accent: "#10b981", accentBg: "rgba(16,185,129,0.08)" },
+    { labelKey: "actions.checkDoctors",  descKey: "actions.checkDoctorsDesc",  Icon: DoctorIcon,   path: "/assistant", q: isMk ? "Прикажи ги сите уролози во Скопје" : "Find all urologists in Skopje", accent: "#6366f1", accentBg: "rgba(99,102,241,0.08)" },
+    { labelKey: "actions.checkEUslugi",  descKey: "actions.checkEUslugiDesc",  Icon: EUslugiIcon,  path: "/assistant", q: isMk ? "Наброј неколку е-услуги кој ги нуди uslugi.gov.mk" : "List a few e-services offered by uslugi.gov.mk", accent: "#0ea5e9", accentBg: "rgba(14,165,233,0.08)" },
+    { labelKey: "actions.chats",         descKey: "actions.chatsDesc",         Icon: ChatIcon,     path: "/chats",     q: null, accent: "#8b5cf6", accentBg: "rgba(139,92,246,0.08)" },
+    { labelKey: "actions.myActivity",    descKey: "actions.myActivityDesc",    Icon: ActivityIcon, path: "/activity",  q: null, accent: "#10b981", accentBg: "rgba(16,185,129,0.08)" },
   ];
 
   useEffect(() => {
